@@ -21,8 +21,8 @@ android {
         applicationId = "com.gameday.tv"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "2.0.0"
     }
 
     signingConfigs {
@@ -55,6 +55,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     lint {
@@ -90,4 +91,6 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
 
     testImplementation("junit:junit:4.13.2")
+    // Real org.json for unit tests (android.jar only has stubs).
+    testImplementation("org.json:json:20240303")
 }

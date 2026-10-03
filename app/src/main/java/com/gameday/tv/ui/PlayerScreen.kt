@@ -1,13 +1,12 @@
 package com.gameday.tv.ui
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -22,23 +21,30 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.gestures.animateScrollBy
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -46,6 +52,7 @@ import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -53,15 +60,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.C
+import androidx.media3.common.TrackSelectionOverride
 import androidx.tv.material3.Text
 import com.gameday.tv.data.Channel
-import com.gameday.tv.data.Game
 import com.gameday.tv.data.GameState
-import com.gameday.tv.data.TeamScore
+import com.gameday.tv.data.GameStats
+import com.gameday.tv.data.StreamFormat
 import com.gameday.tv.ui.theme.AppColors
 import kotlinx.coroutines.delay
-
-private enum class Panel { None, Scores, Channels }
+import java.io.File
 
 internal val OK_KEYS = setOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)
 
@@ -71,345 +79,633 @@ internal val SCORE_KEYS = setOf(Key.Info, Key.Guide, Key.ProgramRed, Key.Program
 /** True on the first auto-repeat of a held key, i.e. a long press. */
 internal fun KeyEvent.isLongPressRepeat(): Boolean = nativeKeyEvent.repeatCount == 1
 
+private enum class Panel { None, Stats, Settings }
+
+/** What the player is showing, flattened from the [PlayRequest]. */
+private data class Now(
+    val key: String,
+    val urls: List<String>,
+    val title: String,
+    val subtitle: String,
+    val channel: Channel?,
+    val startAt: Long,
+    val resumeItem: VodItem?,
+)
+
+/**
+ * Full-screen player with YouTube TV's controls: title and progress at the bottom, a row of round
+ * buttons, a "more to watch" strip below them, and side panels for stats and playback settings.
+ */
 @Composable
 fun PlayerScreen(vm: AppViewModel) {
-    val pb = vm.playback
-    val channel = pb?.current
-    if (pb == null || channel == null) {
-        EmptyState("Nothing to play", modifier = Modifier.padding(top = 120.dp)) { ActionButton("Back", { vm.back() }, primary = true) }
+    val req = vm.playback
+    if (req == null) {
+        EmptyState("Nothing to play", modifier = Modifier.padding(top = 120.dp)) { PillButton("Back", { vm.back() }, primary = true) }
         return
     }
-
+    val now = remember(req) { describe(vm, req) }
     val stream = rememberStreamController()
-    val candidates = remember(channel.id, vm.streamFormat) { vm.streamCandidates(channel) }
-    LaunchedEffect(channel.id, candidates) {
-        stream.load(channel.id, candidates)
-        vm.noteRecent(channel)
+    LaunchedEffect(now.key, now.urls) {
+        stream.load(now.key, now.urls, now.startAt)
+        now.channel?.let { if (req is PlayRequest.Live) vm.noteRecent(it) }
+    }
+    LaunchedEffect(vm.captions, stream) {
+        stream.player.trackSelectionParameters = stream.player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !vm.captions).build()
     }
 
-    // ---- overlays ----
-    var panel by remember { mutableStateOf(Panel.None) }
-    var infoVisible by remember { mutableStateOf(true) }
-    var infoNonce by remember { mutableIntStateOf(0) }
-    var okLongPressed by remember { mutableStateOf(false) }
-    LaunchedEffect(infoNonce, channel.id) {
-        infoVisible = true
-        delay(5_000)
-        infoVisible = false
-    }
-
-    // Score bug: the event we came from, or a live event this channel looks like it's showing.
-    val detectedGame = remember(channel.id, vm.games) { vm.liveGameFor(channel) }
-    val detectedTournament = remember(channel.id, vm.tournaments) { if (detectedGame == null) vm.liveTournamentFor(channel) else null }
-    val linkedGame = pb.eventId?.let { vm.gameById(it) } ?: detectedGame.takeIf { pb.eventId == null }
-    val linkedTournament = pb.eventId?.let { vm.tournamentById(it) } ?: detectedTournament.takeIf { pb.eventId == null }
-    // ScoreBox-style: visible when the stream starts, then hidden until OK / Info, or a score change.
-    val bug = rememberBugState(
-        key = channel.id,
-        scoreKey = scoreKeyOf(linkedGame, linkedTournament),
-        mode = vm.scoreBugMode,
-        popOnScore = vm.scoreAlerts,
-    )
-
-    val rootFocus = remember { FocusRequester() }
-    LaunchedEffect(panel) { if (panel == Panel.None) rootFocus.requestFocusSafely(30) }
-    BackHandler(enabled = panel != Panel.None) { panel = Panel.None }
-
-    fun onOk() {
-        when {
-            stream.error != null -> stream.retry()
-            infoVisible -> infoVisible = false
-            else -> {
-                infoNonce++
-                bug.show()
+    // ---- remember where movies, episodes and recordings were left ----
+    val resumeItem = now.resumeItem
+    if (resumeItem != null) {
+        LaunchedEffect(resumeItem.key) {
+            while (true) {
+                delay(10_000)
+                if (stream.player.duration > 0) vm.saveResume(resumeItem, stream.player.currentPosition, stream.player.duration)
             }
         }
+        DisposableEffect(resumeItem.key) {
+            onDispose { if (stream.player.duration > 0) vm.saveResume(resumeItem, stream.player.currentPosition, stream.player.duration) }
+        }
     }
+    LaunchedEffect(stream.ended) {
+        if (!stream.ended) return@LaunchedEffect
+        resumeItem?.let { vm.saveResume(it, 0, 0) }
+        if (!(vm.autoplayNext && vm.nextVod())) vm.back()
+    }
+
+    // ---- sports context: the event we came from, or one this channel looks like it's showing ----
+    val liveChannel = (req as? PlayRequest.Live)?.current
+    val linkedGame = remember(req, vm.games) {
+        (req as? PlayRequest.Live)?.eventId?.let { vm.gameById(it) } ?: liveChannel?.let { vm.liveGameFor(it) }
+    }
+    val linkedTournament = remember(req, vm.tournaments) {
+        if (linkedGame != null) null
+        else (req as? PlayRequest.Live)?.eventId?.let { vm.tournamentById(it) } ?: liveChannel?.let { vm.liveTournamentFor(it) }
+    }
+    val bug = rememberBugState(
+        key = now.key,
+        scoreKey = scoreKeyOf(linkedGame, linkedTournament),
+        mode = vm.scoreBugMode,
+        popOnScore = vm.scoreAlerts && !vm.hideScores,
+        startVisible = !vm.hideScores,
+    )
+
+    // ---- controls ----
+    var controls by remember { mutableStateOf(true) }
+    var nonce by remember { mutableIntStateOf(0) }
+    var panel by remember { mutableStateOf(Panel.None) }
+    var okLongPressed by remember { mutableStateOf(false) }
+    val rootFocus = remember { FocusRequester() }
+    val playFocus = remember { FocusRequester() }
+    fun poke() { nonce++ }
+    fun showControls() { controls = true; poke() }
+
+    LaunchedEffect(now.key) { showControls() }
+    LaunchedEffect(nonce, controls, panel) {
+        if (!controls || panel != Panel.None) return@LaunchedEffect
+        delay(6_000)
+        controls = false
+    }
+    LaunchedEffect(controls, panel) {
+        when {
+            panel != Panel.None -> Unit
+            controls -> playFocus.requestFocusSafely(40)
+            else -> rootFocus.requestFocusSafely(40)
+        }
+    }
+    BackHandler(enabled = panel != Panel.None) { panel = Panel.None; showControls() }
+    BackHandler(enabled = panel == Panel.None && controls) { controls = false }
+
+    val live = req is PlayRequest.Live
+    val channel = now.channel
 
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .onPreviewKeyEvent { ev ->
+                // Any key keeps the controls up while they're showing.
+                if (controls && ev.type == KeyEventType.KeyDown) poke()
+                false
+            }
             .focusRequester(rootFocus)
             .onKeyEvent { ev ->
                 if (panel != Panel.None) return@onKeyEvent false
-                // OK acts on release so that holding it can mean "add to Multiview" instead.
+                // Media keys work whether or not the controls are showing.
+                if (ev.type == KeyEventType.KeyDown) {
+                    when (ev.key) {
+                        Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { stream.togglePause(); showControls(); return@onKeyEvent true }
+                        Key.MediaFastForward -> { stream.seekBy(30_000); showControls(); return@onKeyEvent true }
+                        Key.MediaRewind -> { stream.seekBy(-10_000); showControls(); return@onKeyEvent true }
+                        Key.ChannelUp -> { vm.zap(+1); return@onKeyEvent true }
+                        Key.ChannelDown -> { vm.zap(-1); return@onKeyEvent true }
+                        in SCORE_KEYS -> { bug.toggle(); return@onKeyEvent true }
+                        else -> Unit
+                    }
+                }
+                if (controls) return@onKeyEvent false
+                // Controls hidden: OK shows them (and the score); hold OK opens Multiview.
                 if (ev.key in OK_KEYS) {
-                    if (ev.type == KeyEventType.KeyDown && ev.isLongPressRepeat()) {
-                        okLongPressed = true
-                        vm.addToMultiview(channel, open = true)
-                    } else if (ev.type == KeyEventType.KeyUp) {
-                        if (!okLongPressed) onOk()
-                        okLongPressed = false
+                    when {
+                        ev.type == KeyEventType.KeyDown && ev.nativeKeyEvent.repeatCount == 0 -> okLongPressed = false
+                        ev.type == KeyEventType.KeyDown && ev.isLongPressRepeat() && channel != null && live -> {
+                            okLongPressed = true
+                            OkKeyGate.swallowRelease()
+                            vm.multiviewWith(channel)
+                        }
+                        ev.type == KeyEventType.KeyUp -> if (!okLongPressed) {
+                            if (stream.error != null) stream.retry()
+                            bug.show()
+                            showControls()
+                        }
                     }
                     return@onKeyEvent true
                 }
                 if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
                 when (ev.key) {
-                    Key.DirectionUp, Key.ChannelUp -> { vm.zap(+1); true }
-                    Key.DirectionDown, Key.ChannelDown -> { vm.zap(-1); true }
-                    Key.DirectionLeft -> { panel = Panel.Scores; true }
-                    Key.DirectionRight, Key.Menu -> { panel = Panel.Channels; true }
-                    Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { stream.togglePause(); true }
-                    in SCORE_KEYS -> { bug.toggle(); true }
+                    Key.DirectionUp -> { if (vm.zapWithDpad && live) vm.zap(+1) else showControls(); true }
+                    Key.DirectionDown -> { if (vm.zapWithDpad && live) vm.zap(-1) else showControls(); true }
+                    Key.DirectionLeft -> { if (stream.seekable) stream.seekBy(-10_000); showControls(); true }
+                    Key.DirectionRight -> { if (stream.seekable) stream.seekBy(30_000); showControls(); true }
+                    Key.Menu -> { panel = Panel.Settings; true }
                     else -> false
                 }
             }
             .focusable()
-            // Touch (phones/tablets): tap toggles the info banner, long-press adds to Multiview.
-            .pointerInput(channel.id) {
+            .pointerInput(now.key) {
                 detectTapGestures(
-                    onTap = { onOk() },
-                    onLongPress = { vm.addToMultiview(channel, open = true) },
+                    onTap = { if (controls) controls = false else showControls() },
+                    onLongPress = { if (channel != null && live) vm.multiviewWith(channel) },
                 )
             },
     ) {
-        VideoSurface(stream, Modifier.fillMaxSize())
+        VideoSurface(stream, Modifier.fillMaxSize(), showSubtitles = vm.captions)
 
         if (stream.buffering && stream.error == null) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 Spinner(48.dp)
-                if (stream.attempt > 0) {
+                val note = when {
+                    stream.reconnecting -> "Stream dropped — reconnecting…"
+                    stream.attempt > 0 -> "Trying alternate stream format…"
+                    stream.softwareDecoding -> null
+                    else -> null
+                }
+                if (note != null) {
                     Spacer(Modifier.height(10.dp))
-                    Text("Trying alternate stream format…", fontSize = 13.sp, color = AppColors.TextDim)
+                    Text(note, fontSize = 13.sp, color = AppColors.TextDim)
                 }
             }
         }
 
         stream.error?.let { msg ->
             Column(
-                Modifier
-                    .align(Alignment.Center)
-                    .width(520.dp)
-                    .background(Color(0xEE111824), RoundedCornerShape(16.dp))
-                    .padding(28.dp),
+                Modifier.align(Alignment.Center).width(540.dp).background(Color(0xF0212121), RoundedCornerShape(12.dp)).padding(28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("Can't play ${channel.name}", fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Text("Can't play ${now.title}", fontSize = 20.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(8.dp))
                 Text(msg, fontSize = 14.sp, color = AppColors.TextDim, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(14.dp))
-                Text("OK  Retry     ▲▼  Other channel     ▶  Channel list", fontSize = 13.sp, color = AppColors.Accent)
+                Text(if (live) "OK  Try again      CH+ / CH−  Other channel" else "OK  Try again", fontSize = 13.sp, color = AppColors.Text)
             }
         }
 
-        EventBug(
-            linkedGame,
-            linkedTournament,
-            bug,
-            Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 32.dp),
-        )
+        EventBug(linkedGame, linkedTournament, bug, Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 32.dp))
 
         AnimatedVisibility(
-            visible = infoVisible && panel == Panel.None,
-            enter = fadeIn() + slideInVertically { it / 2 },
-            exit = fadeOut() + slideOutVertically { it / 2 },
-            modifier = Modifier.align(Alignment.BottomCenter),
+            visible = controls && panel == Panel.None,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.fillMaxSize(),
         ) {
-            val subtitle = linkedGame?.let { "${it.away.shortName} @ ${it.home.shortName}" } ?: linkedTournament?.name
-            InfoBanner(channel, pb.index, pb.channels.size, subtitle)
+            Controls(
+                vm = vm,
+                req = req,
+                now = now,
+                stream = stream,
+                playFocus = playFocus,
+                hasStats = linkedGame != null && linkedGame.state != GameState.PRE,
+                onStats = { panel = Panel.Stats },
+                onSettings = { panel = Panel.Settings },
+                onPoke = ::poke,
+            )
         }
 
         AnimatedVisibility(
-            visible = panel == Panel.Scores,
-            enter = slideInHorizontally { -it },
-            exit = slideOutHorizontally { -it },
-            modifier = Modifier.align(Alignment.CenterStart),
-        ) {
-            ScoresPanel(vm) { eventId ->
-                panel = Panel.None
-                vm.openEventFromPlayer(eventId)
-            }
-        }
-
-        AnimatedVisibility(
-            visible = panel == Panel.Channels,
+            visible = panel == Panel.Stats && linkedGame != null,
             enter = slideInHorizontally { it },
             exit = slideOutHorizontally { it },
             modifier = Modifier.align(Alignment.CenterEnd),
         ) {
-            ChannelsPanel(
-                channels = pb.channels,
-                current = pb.index,
-                multiviewCount = vm.multiviewCount,
-                onPick = { i ->
-                    panel = Panel.None
-                    vm.zapTo(i)
-                },
-                onMultiview = {
-                    panel = Panel.None
-                    vm.addToMultiview(channel, open = true)
-                },
-            )
+            linkedGame?.let { StatsPanel(vm, it) }
+        }
+
+        AnimatedVisibility(
+            visible = panel == Panel.Settings,
+            enter = slideInHorizontally { it },
+            exit = slideOutHorizontally { it },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        ) {
+            SettingsPanel(vm, stream, live)
         }
     }
 }
 
+private fun describe(vm: AppViewModel, req: PlayRequest): Now = when (req) {
+    is PlayRequest.Live -> {
+        val ch = req.current!!
+        Now(ch.id, vm.streamCandidates(ch), cleanChannelName(ch.name), ch.group, ch, 0, null)
+    }
+    is PlayRequest.Catchup -> Now(
+        "cu:${req.channel.id}@${req.program.startMillis}", listOf(req.url), req.program.title,
+        "${cleanChannelName(req.channel.name)} · ${formatDay(req.program.startMillis)} ${formatRange(req.program.startMillis, req.program.endMillis)}",
+        req.channel, 0, null,
+    )
+    is PlayRequest.Vod -> {
+        val item = req.current
+        Now(item.key, listOf(item.url), item.title, item.subtitle, null, vm.resumeFor(item.key)?.positionMs ?: 0, item)
+    }
+    is PlayRequest.Rec -> {
+        val r = req.recording
+        val item = VodItem("rec:${r.id}", r.title, "Recorded ${formatDay(r.startMillis)} · ${cleanChannelName(r.channelName)}", r.image,
+            Uri.fromFile(File(r.file!!)).toString())
+        Now(item.key, listOf(item.url), r.title, item.subtitle, null, vm.resumeFor(item.key)?.positionMs ?: 0, item)
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
-// Overlays
+// Controls overlay
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-private fun InfoBanner(channel: Channel, index: Int, total: Int, subtitle: String?) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xF2000000))))
-            .padding(start = 48.dp, end = 48.dp, top = 48.dp, bottom = 28.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ChannelLogo(channel, 64.dp)
-            Spacer(Modifier.width(18.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    (if (channel.num > 0) "${channel.num}   " else "") + channel.name,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    listOfNotNull(channel.group, subtitle).joinToString("  •  "),
-                    fontSize = 14.sp,
-                    color = AppColors.TextDim,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "OK / Info  Score    ▲▼ Channel    ◀ Live scores    ▶ Channel list    Hold OK  Multiview    BACK Exit",
-                    fontSize = 12.sp,
-                    color = AppColors.TextDim,
-                )
+private fun Controls(
+    vm: AppViewModel,
+    req: PlayRequest,
+    now: Now,
+    stream: StreamController,
+    playFocus: FocusRequester,
+    hasStats: Boolean,
+    onStats: () -> Unit,
+    onSettings: () -> Unit,
+    onPoke: () -> Unit,
+) {
+    val channel = now.channel
+    // Positions are polled while the controls are up.
+    var position by remember { mutableLongStateOf(0L) }
+    var duration by remember { mutableLongStateOf(0L) }
+    var playing by remember { mutableStateOf(true) }
+    var clock by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            position = stream.player.currentPosition
+            duration = stream.player.duration.coerceAtLeast(0)
+            playing = stream.player.playWhenReady
+            clock = System.currentTimeMillis()
+            delay(500)
+        }
+    }
+    val program = when (req) {
+        is PlayRequest.Live -> channel?.let { vm.nowPlaying(it.id, clock) }
+        is PlayRequest.Catchup -> req.program
+        else -> null
+    }
+    if (req is PlayRequest.Live && channel != null) LaunchedEffect(channel.id) { vm.requestEpg(channel) }
+    val seekable = stream.seekable
+
+    Box(Modifier.fillMaxSize()) {
+        // Top: channel and clock.
+        Row(
+            Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color(0xCC000000), Color.Transparent))).padding(horizontal = 48.dp, vertical = 22.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (channel != null) {
+                ChannelLogo(channel, 44.dp, background = Color(0x33FFFFFF))
+                Spacer(Modifier.width(12.dp))
+                Text(cleanChannelName(channel.name), fontSize = 16.sp, fontWeight = FontWeight.Medium)
             }
-            if (total > 1) Text("${index + 1} / $total", fontSize = 14.sp, color = AppColors.TextDim)
+            Spacer(Modifier.weight(1f))
+            Text(formatTime(clock), fontSize = 16.sp, color = AppColors.TextDim)
         }
-    }
-}
 
-@Composable
-private fun ScoresPanel(vm: AppViewModel, onPick: (eventId: String) -> Unit) {
-    val now = System.currentTimeMillis()
-    val golf = remember(vm.tournaments) { vm.tournaments.filter { it.state == GameState.LIVE } }
-    val games = remember(vm.games) {
-        vm.games.filter { it.state == GameState.LIVE }.sortedBy { it.startMillis } +
-            vm.games.filter { it.state == GameState.PRE && it.startMillis - now < 12 * 60 * 60_000L }.sortedBy { it.startMillis }.take(20)
-    }
-    val firstId = golf.firstOrNull()?.id ?: games.firstOrNull()?.id
-    val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) { first.requestFocusSafely(120) }
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6000000), Color(0xF2000000))))
+                .padding(start = 48.dp, end = 48.dp, top = 60.dp, bottom = 14.dp),
+        ) {
+            Text(program?.title ?: now.title, fontSize = 26.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                when {
+                    req is PlayRequest.Live && program != null -> "${now.title} · ${formatRange(program.startMillis, program.endMillis)}"
+                    else -> now.subtitle
+                },
+                fontSize = 14.sp,
+                color = AppColors.TextDim,
+                maxLines = 1,
+            )
+            Spacer(Modifier.height(12.dp))
 
-    Column(
-        Modifier
-            .width(380.dp)
-            .fillMaxHeight()
-            .background(Color(0xF20B111B))
-            .padding(start = 28.dp, end = 16.dp, top = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            LiveDot(10.dp)
-            Spacer(Modifier.width(8.dp))
-            Text("Live Scores", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        }
-        Text("Select an event to find its channel", fontSize = 12.sp, color = AppColors.TextDim)
-        Spacer(Modifier.height(12.dp))
-        if (games.isEmpty() && golf.isEmpty()) {
-            Text("No live or upcoming events right now.", fontSize = 14.sp, color = AppColors.TextDim)
-        }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(4.dp, 4.dp, 4.dp, 24.dp)) {
-            items(golf, key = { it.id }) { t ->
-                PanelCard(onClick = { onPick(t.id) }, focus = if (t.id == firstId) first else null) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(t.tour.label, fontSize = 11.sp, color = AppColors.TextDim, modifier = Modifier.weight(1f))
-                        Text(t.detail.replace("Round ", "R"), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (t.roundInProgress) AppColors.Live else AppColors.TextDim)
-                    }
-                    Text(t.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    t.leaders.take(2).forEach { p ->
-                        Row {
-                            Text("${p.position}  ${p.shortName}", fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1)
-                            Text(p.toPar, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = parColor(p.toPar))
+            // Progress: live program progress, or a seek bar for movies and recordings.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                when {
+                    req is PlayRequest.Live -> {
+                        LiveBadge()
+                        Spacer(Modifier.width(12.dp))
+                        if (program != null) {
+                            Text(formatTime(program.startMillis), fontSize = 12.sp, color = AppColors.TextDim)
+                            Spacer(Modifier.width(10.dp))
+                            ProgressLine(program.progress(clock), Modifier.weight(1f))
+                            Spacer(Modifier.width(10.dp))
+                            Text(formatTime(program.endMillis), fontSize = 12.sp, color = AppColors.TextDim)
+                        } else {
+                            ProgressLine(1f, Modifier.weight(1f))
                         }
                     }
-                }
-            }
-            items(games, key = { it.id }) { g ->
-                PanelCard(onClick = { onPick(g.id) }, focus = if (g.id == firstId) first else null) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(g.league.label, fontSize = 11.sp, color = AppColors.TextDim, modifier = Modifier.weight(1f))
-                        StatusBadge(g)
+                    seekable -> SeekBar(position, duration, stream, onPoke, Modifier.weight(1f))
+                    else -> {
+                        Text("Replay", fontSize = 12.sp, color = AppColors.TextDim)
+                        Spacer(Modifier.width(10.dp))
+                        ProgressLine(if (duration > 0) position.toFloat() / duration else 0f, Modifier.weight(1f))
                     }
-                    Spacer(Modifier.height(4.dp))
-                    CompactTeam(g.away, g)
-                    CompactTeam(g.home, g)
                 }
             }
+            Spacer(Modifier.height(14.dp))
+
+            // Buttons.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.Top) {
+                if (seekable) IconCircleButton(Icons.Rewind, "Back 10s", { stream.seekBy(-10_000) })
+                IconCircleButton(if (playing) Icons.Pause else Icons.Play, if (playing) "Pause" else "Play", { stream.togglePause() },
+                    Modifier.focusRequester(playFocus), size = 60.dp)
+                if (seekable) IconCircleButton(Icons.Forward, "Forward 30s", { stream.seekBy(30_000) })
+                when (req) {
+                    is PlayRequest.Live -> {
+                        if (channel != null && program != null && vm.catchupUrl(channel, program) != null) {
+                            IconCircleButton(Icons.Restart, "Start over", { vm.playCatchup(channel, program) })
+                        }
+                        if (channel != null) {
+                            val game = req.eventId?.let { vm.gameById(it) }
+                            val rec = game?.let { vm.recordingForEvent(it.id) }
+                            IconCircleButton(Icons.Record, if (rec != null) "Recording" else "Record", {
+                                when {
+                                    rec != null -> recordingMenu(vm, rec)
+                                    game != null -> vm.recordGame(game, channel)
+                                    else -> recordMenu(vm, channel)
+                                }
+                            }, active = rec != null, tint = if (rec != null) AppColors.Live else null)
+                            IconCircleButton(Icons.Multiview, "Multiview", { vm.multiviewWith(channel) })
+                        }
+                    }
+                    is PlayRequest.Catchup -> IconCircleButton(Icons.LiveTv, "Go live", { vm.goLive() })
+                    else -> Unit
+                }
+                if (hasStats) IconCircleButton(Icons.Stats, "Stats", onStats)
+                IconCircleButton(Icons.Captions, if (vm.captions) "Captions on" else "Captions off", { vm.updateCaptions(!vm.captions) }, active = vm.captions)
+                IconCircleButton(Icons.Settings, "Settings", onSettings)
+                if (channel != null && req is PlayRequest.Live) {
+                    val fav = vm.isFavoriteChannel(channel.id)
+                    IconCircleButton(Icons.Star, if (fav) "Favorite" else "Add favorite", { vm.toggleFavoriteChannel(channel) }, active = fav)
+                }
+            }
+
+            // More to watch: the zap list for live TV, the episode queue for shows.
+            MoreStrip(vm, req, onPoke)
         }
     }
 }
 
 @Composable
-private fun PanelCard(onClick: () -> Unit, focus: FocusRequester?, content: @Composable () -> Unit) {
+private fun SeekBar(position: Long, duration: Long, stream: StreamController, onPoke: () -> Unit, modifier: Modifier) {
+    var focused by remember { mutableStateOf(false) }
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Text(clockText(position), fontSize = 13.sp, color = AppColors.TextDim)
+        Spacer(Modifier.width(12.dp))
+        Box(
+            Modifier
+                .weight(1f)
+                .height(20.dp)
+                .onFocusChanged { focused = it.isFocused }
+                .onKeyEvent { ev ->
+                    if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
+                    // Holding the button scrubs faster.
+                    val step = if (ev.nativeKeyEvent.repeatCount > 10) 60_000L else 10_000L
+                    when (ev.key) {
+                        Key.DirectionLeft -> { stream.seekBy(-step); onPoke(); true }
+                        Key.DirectionRight -> { stream.seekBy(step); onPoke(); true }
+                        in OK_KEYS -> { stream.togglePause(); true }
+                        else -> false
+                    }
+                }
+                .focusable(),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            val p = if (duration > 0) position.toFloat() / duration else 0f
+            ProgressLine(p, Modifier.height(if (focused) 6.dp else 3.dp))
+            if (focused) {
+                Box(Modifier.fillMaxWidth(p.coerceIn(0.005f, 1f)), contentAlignment = Alignment.CenterEnd) {
+                    Box(Modifier.size(14.dp).background(AppColors.Live, androidx.compose.foundation.shape.CircleShape))
+                }
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(clockText(duration), fontSize = 13.sp, color = AppColors.TextDim)
+    }
+}
+
+@Composable
+private fun MoreStrip(vm: AppViewModel, req: PlayRequest, onPoke: () -> Unit) {
+    when (req) {
+        is PlayRequest.Live -> {
+            if (req.channels.size < 2) return
+            val state = rememberLazyListState(initialFirstVisibleItemIndex = (req.index - 1).coerceAtLeast(0))
+            Text("Channels", fontSize = 13.sp, color = AppColors.TextDim, modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
+            LazyRow(state = state, horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(end = 48.dp)) {
+                itemsIndexed(req.channels, key = { _, c -> c.id }) { i, c ->
+                    LaunchedEffect(c.id) { delay(300); vm.requestEpg(c) }
+                    MiniCard(
+                        title = vm.nowPlaying(c.id)?.title ?: cleanChannelName(c.name),
+                        subtitle = cleanChannelName(c.name),
+                        selected = i == req.index,
+                        onFocus = onPoke,
+                        onClick = { vm.zapTo(i) },
+                    ) { ChannelLogo(c, 34.dp, background = Color.Transparent) }
+                }
+            }
+        }
+        is PlayRequest.Vod -> {
+            if (req.queue.size < 2) return
+            val state = rememberLazyListState(initialFirstVisibleItemIndex = req.index)
+            Text("Episodes", fontSize = 13.sp, color = AppColors.TextDim, modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
+            LazyRow(state = state, horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(end = 48.dp)) {
+                itemsIndexed(req.queue, key = { _, e -> e.key }) { i, e ->
+                    MiniCard(e.subtitle, e.title, i == req.index, onPoke, { vm.jumpVod(i) }) {}
+                }
+            }
+        }
+        else -> Unit
+    }
+}
+
+@Composable
+private fun MiniCard(title: String, subtitle: String, selected: Boolean, onFocus: () -> Unit, onClick: () -> Unit, icon: @Composable () -> Unit) {
     FocusSurface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().then(if (focus != null) Modifier.focusRequester(focus) else Modifier),
-        focusedScale = 1.03f,
-        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.width(210.dp).height(54.dp).onFocusChanged { if (it.isFocused) onFocus() },
+        containerColor = if (selected) Color(0x55FFFFFF) else Color(0x26FFFFFF),
+        focusedContainerColor = Color(0x66FFFFFF),
+        shape = RoundedCornerShape(8.dp),
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) { content() }
+        Row(Modifier.fillMaxSize().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            icon()
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, fontSize = 11.sp, color = AppColors.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Side panels
+// ---------------------------------------------------------------------------------------------
+
 @Composable
-private fun CompactTeam(team: TeamScore, game: Game) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-        TeamLogo(team.logo, team.abbreviation, 20.dp)
-        Spacer(Modifier.width(8.dp))
-        Text(team.shortName, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (game.state != GameState.PRE) Text(team.score, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+private fun StatsPanel(vm: AppViewModel, game: com.gameday.tv.data.Game) {
+    var stats by remember { mutableStateOf<GameStats?>(null) }
+    var reveal by remember { mutableStateOf(false) }
+    val first = remember { FocusRequester() }
+    LaunchedEffect(game.id) {
+        while (true) {
+            runCatching { vm.gameStats(game) }.onSuccess { stats = it }
+            delay(30_000)
+        }
     }
-}
+    LaunchedEffect(Unit) { first.requestFocusSafely(150) }
+    val hide = vm.hideScores && !reveal
 
-@Composable
-private fun ChannelsPanel(
-    channels: List<Channel>,
-    current: Int,
-    multiviewCount: Int,
-    onPick: (Int) -> Unit,
-    onMultiview: () -> Unit,
-) {
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (current - 3).coerceAtLeast(0))
-    val currentFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { currentFocus.requestFocusSafely(120) }
-
-    Column(
-        Modifier
-            .width(440.dp)
-            .fillMaxHeight()
-            .background(Color(0xF20B111B))
-            .padding(start = 16.dp, end = 28.dp, top = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.width(430.dp).fillMaxHeight().background(Color(0xF2181818)).padding(top = 24.dp)) {
+        Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Channels", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text("${channels.size} in this list", fontSize = 12.sp, color = AppColors.TextDim)
+                Text("Stats", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                Text(if (hide) game.title else statusLine(game, false), fontSize = 13.sp, color = AppColors.TextDim, maxLines = 1)
             }
-            ActionButton(if (multiviewCount > 0) "⊞ Multiview ($multiviewCount)" else "⊞ Multiview", onMultiview)
+            PillButton(if (hide) "Show" else "Game page", { if (hide) reveal = true else vm.openEventFromPlayer(game.id) }, Modifier.focusRequester(first))
         }
-        Spacer(Modifier.height(12.dp))
-        LazyColumn(
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            contentPadding = PaddingValues(4.dp, 4.dp, 4.dp, 24.dp),
-        ) {
-            itemsIndexed(channels, key = { _, c -> c.id }) { i, ch ->
-                ChannelRow(
-                    channel = ch,
-                    subtitle = ch.group,
-                    playing = i == current,
-                    onClick = { onPick(i) },
-                    modifier = if (i == current) Modifier.focusRequester(currentFocus) else Modifier,
-                )
+        Spacer(Modifier.height(10.dp))
+        val s = stats
+        when {
+            hide -> Text("Scores are hidden. Select Show to see stats.", fontSize = 14.sp, color = AppColors.TextDim, modifier = Modifier.padding(20.dp))
+            s == null -> LoadingState("Loading stats…")
+            else -> {
+                // The rows aren't focusable: the list itself takes focus and scrolls with Up/Down.
+                val listState = rememberLazyListState()
+                val scope = rememberCoroutineScope()
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .onKeyEvent { ev ->
+                            if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
+                            when (ev.key) {
+                                Key.DirectionDown -> { scope.launch { listState.animateScrollBy(180f) }; true }
+                                Key.DirectionUp -> {
+                                    val atTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+                                    if (!atTop) scope.launch { listState.animateScrollBy(-180f) }
+                                    !atTop
+                                }
+                                else -> false
+                            }
+                        }
+                        .focusable(),
+                    contentPadding = PaddingValues(bottom = 40.dp),
+                ) { statsItems(s, game, padding = 20) }
             }
         }
     }
+}
+
+@Composable
+private fun SettingsPanel(vm: AppViewModel, stream: StreamController, live: Boolean) {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) { first.requestFocusSafely(150) }
+    val tracks = stream.player.currentTracks
+    val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+    val text = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+    val video = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+
+    LazyColumn(
+        Modifier.width(400.dp).fillMaxHeight().background(Color(0xF2181818)),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
+    ) {
+        item(key = "title") { Text("Playback settings", fontSize = 20.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 12.dp, bottom = 10.dp)) }
+        item(key = "zoom") {
+            SettingRow("Picture size", { stream.zoom = !stream.zoom }, Modifier.focusRequester(first), value = if (stream.zoom) "Zoom to fill" else "Fit")
+        }
+        if (live) {
+            item(key = "format") {
+                SettingRow("Stream format", { vm.updateStreamFormat(if (vm.streamFormat == StreamFormat.TS) StreamFormat.HLS else StreamFormat.TS) },
+                    subtitle = "Switch if this channel stutters or won't play", value = vm.streamFormat.label)
+            }
+        }
+        if (audio.size > 1) {
+            item(key = "audio-h") { PanelHeader("Audio") }
+            audio.forEachIndexed { i, g ->
+                val f = g.getTrackFormat(0)
+                item(key = "a$i") {
+                    SettingRow(
+                        f.label ?: f.language?.let { java.util.Locale.forLanguageTag(it).displayLanguage } ?: "Track ${i + 1}",
+                        {
+                            stream.player.trackSelectionParameters = stream.player.trackSelectionParameters.buildUpon()
+                                .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0)).build()
+                        },
+                        checked = g.isSelected,
+                    )
+                }
+            }
+        }
+        if (text.isNotEmpty()) {
+            item(key = "cc-h") { PanelHeader("Captions") }
+            item(key = "cc-off") { SettingRow("Off", { vm.updateCaptions(false) }, checked = !vm.captions) }
+            text.forEachIndexed { i, g ->
+                val f = g.getTrackFormat(0)
+                item(key = "t$i") {
+                    SettingRow(
+                        f.label ?: f.language?.let { java.util.Locale.forLanguageTag(it).displayLanguage } ?: "Captions ${i + 1}",
+                        {
+                            vm.updateCaptions(true)
+                            stream.player.trackSelectionParameters = stream.player.trackSelectionParameters.buildUpon()
+                                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                                .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0)).build()
+                        },
+                        checked = vm.captions && g.isSelected,
+                    )
+                }
+            }
+        }
+        val heights = video.flatMap { g -> (0 until g.length).map { g.getTrackFormat(it).height } }.filter { it > 0 }.distinct().sortedDescending()
+        if (heights.size > 1) {
+            item(key = "q-h") { PanelHeader("Quality") }
+            item(key = "q-auto") {
+                SettingRow("Auto", {
+                    stream.player.trackSelectionParameters = stream.player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                        .setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE).build()
+                })
+            }
+            heights.forEach { h ->
+                item(key = "q$h") {
+                    SettingRow("${h}p", {
+                        stream.player.trackSelectionParameters = stream.player.trackSelectionParameters.buildUpon().setMaxVideoSize(Int.MAX_VALUE, h).build()
+                    })
+                }
+            }
+        }
+        item(key = "dec") {
+            if (stream.softwareDecoding) Text("Decoding in software (this TV's video decoders are busy).", fontSize = 12.sp, color = AppColors.TextFaint, modifier = Modifier.padding(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun PanelHeader(text: String) {
+    Text(text, fontSize = 13.sp, color = AppColors.TextDim, modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 4.dp))
 }

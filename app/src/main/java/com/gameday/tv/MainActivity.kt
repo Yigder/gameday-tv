@@ -1,6 +1,7 @@
 package com.gameday.tv
 
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -25,17 +26,31 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.tv.material3.Text
-import com.gameday.tv.ui.AccountScreen
 import com.gameday.tv.ui.AppViewModel
-import com.gameday.tv.ui.ChannelsScreen
+import com.gameday.tv.ui.BrowseScreen
+import com.gameday.tv.ui.ChannelScreen
+import com.gameday.tv.ui.CreateAccountScreen
+import com.gameday.tv.ui.DialogHost
 import com.gameday.tv.ui.GameScreen
-import com.gameday.tv.ui.HomeScreen
-import com.gameday.tv.ui.LoginScreen
+import com.gameday.tv.ui.MainShell
+import com.gameday.tv.ui.MovieScreen
+import com.gameday.tv.ui.MultiviewBuilderScreen
 import com.gameday.tv.ui.MultiviewScreen
-import com.gameday.tv.ui.MySportsScreen
+import com.gameday.tv.ui.OkKeyGate
+import com.gameday.tv.ui.OnboardingScreen
 import com.gameday.tv.ui.PlayerScreen
+import com.gameday.tv.ui.ProfileEditScreen
+import com.gameday.tv.ui.ProfilesScreen
+import com.gameday.tv.ui.ProviderScreen
 import com.gameday.tv.ui.Screen
+import com.gameday.tv.ui.SearchScreen
+import com.gameday.tv.ui.SeriesScreen
+import com.gameday.tv.ui.SettingsScreen
+import com.gameday.tv.ui.SignInScreen
+import com.gameday.tv.ui.TeamScreen
+import com.gameday.tv.ui.TeamsPickerScreen
 import com.gameday.tv.ui.TournamentScreen
+import com.gameday.tv.ui.WelcomeScreen
 import com.gameday.tv.ui.theme.AppColors
 import com.gameday.tv.ui.theme.GameDayTheme
 
@@ -52,6 +67,11 @@ class MainActivity : ComponentActivity() {
             GameDayTheme { GameDayApp() }
         }
     }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (OkKeyGate.shouldConsume(event)) return true
+        return super.dispatchKeyEvent(event)
+    }
 }
 
 @Composable
@@ -60,22 +80,38 @@ private fun GameDayApp(vm: AppViewModel = viewModel()) {
     // Keeps each screen's scroll positions/selections when navigating back to it.
     val stateHolder = rememberSaveableStateHolder()
 
-    BackHandler(enabled = vm.canGoBack) { vm.back() }
+    BackHandler(enabled = vm.dialog != null) { vm.dismissDialog() }
+    BackHandler(enabled = vm.dialog == null && vm.canGoBack) { vm.back() }
 
     Box(Modifier.fillMaxSize()) {
         stateHolder.SaveableStateProvider(screen.key) {
             when (screen) {
-                Screen.Login -> LoginScreen(vm)
-                Screen.Home -> HomeScreen(vm)
+                Screen.Splash -> Box(Modifier.fillMaxSize())
+                Screen.Welcome -> WelcomeScreen(vm)
+                is Screen.SignIn -> SignInScreen(vm, screen.email)
+                Screen.CreateAccount -> CreateAccountScreen(vm)
+                is Screen.Onboarding -> OnboardingScreen(vm, screen.step)
+                Screen.Provider -> ProviderScreen(vm, onboarding = false)
+                Screen.TeamsPicker -> TeamsPickerScreen(vm)
+                is Screen.Profiles -> ProfilesScreen(vm, screen.manage)
+                is Screen.ProfileEdit -> ProfileEditScreen(vm, screen.profileId)
+                Screen.Main -> MainShell(vm, stateHolder)
+                Screen.Search -> SearchScreen(vm)
+                is Screen.Settings -> SettingsScreen(vm)
                 is Screen.GameDetail -> GameScreen(vm, screen.gameId)
                 is Screen.TournamentDetail -> TournamentScreen(vm, screen.tournamentId)
-                is Screen.Channels -> ChannelsScreen(vm, screen.query)
+                is Screen.Team -> TeamScreen(vm, screen.leagueKey, screen.teamId)
+                is Screen.ChannelDetail -> ChannelScreen(vm, screen.channelId)
+                is Screen.MovieDetail -> MovieScreen(vm, screen.movieId)
+                is Screen.SeriesDetail -> SeriesScreen(vm, screen.seriesId)
+                is Screen.Browse -> BrowseScreen(vm, screen.kind, screen.categoryId)
                 Screen.Player -> PlayerScreen(vm)
                 Screen.Multiview -> MultiviewScreen(vm)
-                Screen.MySports -> MySportsScreen(vm)
-                Screen.Account -> AccountScreen(vm)
+                Screen.MultiviewBuilder -> MultiviewBuilderScreen(vm)
             }
         }
+
+        vm.dialog?.let { DialogHost(vm, it) }
 
         AnimatedVisibility(
             visible = vm.message != null,
@@ -86,10 +122,10 @@ private fun GameDayApp(vm: AppViewModel = viewModel()) {
             Text(
                 vm.message.orEmpty(),
                 fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Medium,
                 color = Color.Black,
                 modifier = Modifier
-                    .background(AppColors.Text, RoundedCornerShape(50))
+                    .background(AppColors.Text, RoundedCornerShape(8.dp))
                     .padding(horizontal = 20.dp, vertical = 10.dp),
             )
         }

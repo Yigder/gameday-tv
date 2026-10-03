@@ -66,14 +66,23 @@ class BugState {
  * @param scoreKey changes whenever the score (or golf leader) changes.
  */
 @Composable
-fun rememberBugState(key: Any?, scoreKey: String?, mode: ScoreBugMode, popOnScore: Boolean, showMillis: Long = 8_000): BugState {
-    val state = remember(key) { BugState() }
+fun rememberBugState(
+    key: Any?,
+    scoreKey: String?,
+    mode: ScoreBugMode,
+    popOnScore: Boolean,
+    showMillis: Long = 8_000,
+    /** False with "Hide scores": the bug stays away until the viewer asks for it. */
+    startVisible: Boolean = true,
+): BugState {
+    val state = remember(key) { BugState().apply { visible = startVisible } }
     var lastScore by remember(key) { mutableStateOf(scoreKey) }
     LaunchedEffect(state, scoreKey) {
         if (scoreKey != null && lastScore != null && scoreKey != lastScore) state.flashNonce++
         lastScore = scoreKey
     }
     LaunchedEffect(state, state.showNonce, mode) {
+        if (state.showNonce == 0 && !startVisible) return@LaunchedEffect
         state.visible = true
         if (mode == ScoreBugMode.ALWAYS) return@LaunchedEffect
         delay(showMillis)
@@ -82,7 +91,7 @@ fun rememberBugState(key: Any?, scoreKey: String?, mode: ScoreBugMode, popOnScor
     LaunchedEffect(state, state.flashNonce) {
         if (state.flashNonce == 0) return@LaunchedEffect
         state.flash = true
-        if (popOnScore) state.show()
+        if (popOnScore && startVisible) state.show()
         delay(6_000)
         state.flash = false
     }

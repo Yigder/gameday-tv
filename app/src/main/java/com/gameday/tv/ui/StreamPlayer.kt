@@ -1,6 +1,9 @@
 package com.gameday.tv.ui
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.view.SurfaceView
 import android.view.ViewGroup
 import androidx.annotation.OptIn
 import androidx.compose.runtime.Composable
@@ -28,7 +31,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -42,46 +47,99 @@ import kotlinx.coroutines.delay
  */
 @Stable
 class StreamController(context: Context, handleAudioFocus: Boolean) {
-    val player: ExoPlayer = buildPlayer(context, handleAudioFocus)
+    /** Decode video on the CPU: set when this device is out of hardware decoders (see [DecoderBudget]). */
+    @Volatile
+    private var preferSoftware = false
+    private var forcedSoftware = false
+
+    val player: ExoPlayer = buildPlayer(context, handleAudioFocus) { preferSoftware }
+
+    /** True while this stream is decoding in software. */
+    var softwareDecoding by mutableStateOf(false); private set
 
     var buffering by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
     var attempt by mutableIntStateOf(0); private set
     /** Changes every time a URL starts loading, so stall timers restart. */
     var loadToken by mutableIntStateOf(0); private set
+    /** A stream that was playing dropped and is being reconnected. */
+    var reconnecting by mutableStateOf(false); private set
+    /** A movie, episode or recording reached its end. */
+    var ended by mutableStateOf(false); private set
+
+    /** Where to start (or resume after a dropped connection) for seekable video. */
+    private var startAt = 0L
 
     private var key: String? = null
     private var candidates: List<String> = emptyList()
+    private var playedOk = false
+    private var reconnects = 0
+    private val handler = Handler(Looper.getMainLooper())
+    private val reconnectRunnable = Runnable {
+        attempt = 0
+        start()
+    }
 
     init {
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
+                ended = playbackState == Player.STATE_ENDED
+                if (playbackState == Player.STATE_READY) {
+                    playedOk = true
+                    reconnecting = false
+                    reconnects = 0
+                }
             }
 
             override fun onPlayerError(e: PlaybackException) {
-                if (e.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
-                    player.seekToDefaultPosition()
-                    player.prepare()
-                } else {
-                    fallback(describe(e))
+                when {
+                    e.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
+                        player.seekToDefaultPosition()
+                        player.prepare()
+                    }
+                    isDecoderError(e) && !preferSoftware -> {
+                        // Another stream took this one's hardware decoder. Don't take it back (that
+                        // would kill the other stream); remember the limit and continue in software.
+                        DecoderBudget.learnFromFailure(this@StreamController)
+                        forcedSoftware = true
+                        start()
+                    }
+                    isDecoderError(e) -> {
+                        reconnecting = false
+                        player.stop()
+                        buffering = false
+                        error = "This TV can't decode another video right now. Try a layout with fewer screens."
+                    }
+                    else -> fallback(describe(e))
                 }
             }
         })
     }
 
-    /** Starts [urls] unless this exact stream is already loaded. */
-    fun load(key: String, urls: List<String>) {
+    /** Starts [urls] unless this exact stream is already loaded. [startPositionMs] resumes seekable video. */
+    fun load(key: String, urls: List<String>, startPositionMs: Long = 0) {
         if (key == this.key && urls == candidates) return
         this.key = key
         candidates = urls
+        startAt = startPositionMs.coerceAtLeast(0)
+        ended = false
         attempt = 0
+        resetReconnects()
         start()
     }
 
     fun retry() {
         attempt = 0
+        resetReconnects()
         start()
+    }
+
+    private fun resetReconnects() {
+        handler.removeCallbacks(reconnectRunnable)
+        playedOk = false
+        reconnects = 0
+        reconnecting = false
     }
 
     fun onStalled() {
@@ -92,10 +150,25 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         if (player.isPlaying) {
             player.pause()
         } else {
-            player.seekToDefaultPosition()
+            // Live streams resume at the live edge; movies and recordings where they paused.
+            if (player.isCurrentMediaItemLive || !player.isCurrentMediaItemSeekable) player.seekToDefaultPosition()
             player.play()
         }
     }
+
+    val seekable: Boolean get() = player.isCurrentMediaItemSeekable && !player.isCurrentMediaItemLive && player.duration > 0
+
+    fun seekBy(deltaMs: Long) {
+        if (!seekable) return
+        player.seekTo((player.currentPosition + deltaMs).coerceIn(0, player.duration))
+    }
+
+    fun seekTo(positionMs: Long) {
+        if (seekable) player.seekTo(positionMs.coerceIn(0, player.duration))
+    }
+
+    /** Video sizing: fit (letterbox) or zoom to fill. */
+    var zoom by mutableStateOf(false)
 
     var volume: Float
         get() = player.volume
@@ -110,42 +183,67 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
             .build()
     }
 
-    fun onAppStopped() = player.stop()
-
-    fun onAppStarted() {
-        if (player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0 && error == null) {
-            player.prepare()
-            player.seekToDefaultPosition()
-            player.play()
-        }
+    fun onAppStopped() {
+        handler.removeCallbacks(reconnectRunnable)
+        player.stop()
+        DecoderBudget.release(this)
     }
 
-    fun release() = player.release()
+    fun onAppStarted() {
+        if (player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0 && error == null) start()
+    }
+
+    fun release() {
+        handler.removeCallbacks(reconnectRunnable)
+        DecoderBudget.release(this)
+        player.release()
+    }
 
     private fun start() {
         error = null
         val url = candidates.getOrNull(attempt)
         if (url == null) {
             player.stop()
+            DecoderBudget.release(this)
             error = "This channel has no stream address."
             return
         }
+        // Claim a hardware decoder if the device has one free; otherwise decode in software.
+        DecoderBudget.release(this)
+        preferSoftware = forcedSoftware || !DecoderBudget.canUseHardware()
+        if (!preferSoftware) DecoderBudget.acquire(this)
+        softwareDecoding = preferSoftware
         buffering = true
         loadToken++
-        player.setMediaItem(mediaItemFor(url))
+        player.stop() // codecs are chosen at prepare time, so start clean
+        if (startAt > 0) player.setMediaItem(mediaItemFor(url), startAt) else player.setMediaItem(mediaItemFor(url))
         player.prepare()
         player.playWhenReady = true
     }
 
     private fun fallback(message: String) {
-        if (attempt + 1 < candidates.size) {
+        if (playedOk && reconnects < MAX_RECONNECTS) {
+            // It was playing, so the address is right: the stream dropped. Reconnect with backoff.
+            if (seekable) startAt = player.currentPosition
+            reconnects++
+            playedOk = false
+            reconnecting = true
+            buffering = true
+            player.stop()
+            handler.postDelayed(reconnectRunnable, 2_000L * reconnects)
+        } else if (attempt + 1 < candidates.size) {
             attempt++
             start()
         } else {
+            reconnecting = false
             player.stop()
             buffering = false
             error = message
         }
+    }
+
+    private companion object {
+        const val MAX_RECONNECTS = 3
     }
 }
 
@@ -184,10 +282,12 @@ fun rememberStreamController(handleAudioFocus: Boolean = true): StreamController
 
 @OptIn(UnstableApi::class)
 @Composable
-fun VideoSurface(controller: StreamController, modifier: Modifier = Modifier) {
+fun VideoSurface(controller: StreamController, modifier: Modifier = Modifier, onTop: Boolean = false, showSubtitles: Boolean = true) {
     AndroidView(
         factory = { ctx ->
             PlayerView(ctx).apply {
+                // A video window drawn inside another (picture-in-picture) must layer above it.
+                if (onTop) (videoSurfaceView as? SurfaceView)?.setZOrderMediaOverlay(true)
                 useController = false
                 player = controller.player
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -199,7 +299,11 @@ fun VideoSurface(controller: StreamController, modifier: Modifier = Modifier) {
                 setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
             }
         },
-        update = { it.player = controller.player },
+        update = {
+            it.player = controller.player
+            it.resizeMode = if (controller.zoom) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+            it.subtitleView?.visibility = if (showSubtitles) android.view.View.VISIBLE else android.view.View.GONE
+        },
         modifier = modifier,
     )
 }
@@ -207,14 +311,23 @@ fun VideoSurface(controller: StreamController, modifier: Modifier = Modifier) {
 // ---------------------------------------------------------------------------------------------
 
 @OptIn(UnstableApi::class)
-private fun buildPlayer(context: Context, handleAudioFocus: Boolean): ExoPlayer {
+private fun buildPlayer(context: Context, handleAudioFocus: Boolean, preferSoftware: () -> Boolean): ExoPlayer {
+    DecoderBudget.init(context)
     // OkHttp carries the configurable User-Agent and follows http<->https redirects, which IPTV panels use a lot.
     val dataSource = OkHttpDataSource.Factory(Http.client)
     val mediaSources = DefaultMediaSourceFactory(context).setDataSourceFactory(dataSource)
+    // Video decoders are listed hardware-first by default; flip that when this stream must use software.
+    val codecSelector = MediaCodecSelector { mimeType, secure, tunneling ->
+        val all = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, secure, tunneling)
+        if (preferSoftware() && MimeTypes.isVideo(mimeType)) all.sortedBy { if (it.softwareOnly) 0 else 1 } else all
+    }
+    val renderers = DefaultRenderersFactory(context)
+        .setMediaCodecSelector(codecSelector)
+        .setEnableDecoderFallback(true)
     val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(15_000, 50_000, 2_000, 4_000)
         .build()
-    return ExoPlayer.Builder(context)
+    return ExoPlayer.Builder(context, renderers)
         .setMediaSourceFactory(mediaSources)
         .setLoadControl(loadControl)
         .setAudioAttributes(
@@ -233,6 +346,12 @@ private fun mediaItemFor(url: String): MediaItem {
     return builder.build()
 }
 
+private fun isDecoderError(e: PlaybackException): Boolean = e.errorCode in setOf(
+    PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+    PlaybackException.ERROR_CODE_DECODING_FAILED,
+    PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED,
+)
+
 @OptIn(UnstableApi::class)
 private fun describe(e: PlaybackException): String = when (e.errorCode) {
     PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> {
@@ -246,11 +365,13 @@ private fun describe(e: PlaybackException): String = when (e.errorCode) {
     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
         "Couldn't connect to the stream. Check your internet connection."
+    // IPTV servers answer offline channels with a non-video response, which shows up as "unsupported".
+    PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ->
+        "This channel isn't sending video right now. It may be offline, or an event channel between events."
     PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
     PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
-    PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
     PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED ->
-        "The stream format isn't supported. Try switching between MPEG-TS and HLS in Account."
+        "The stream format isn't supported. Try switching between MPEG-TS and HLS in Settings › Playback."
     PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
     PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
     PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
