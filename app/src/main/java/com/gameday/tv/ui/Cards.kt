@@ -327,6 +327,10 @@ data class HeroInfo(
     val channel: Channel? = null,
     val progress: Float? = null,
     val tournament: Tournament? = null,
+    /** Title art (a transparent logo) shown instead of the title text — On Demand. */
+    val logo: String? = null,
+    /** "7.8" (IMDb), shown as a badge — On Demand. */
+    val rating: String? = null,
 )
 
 /**

@@ -206,10 +206,43 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
 
     val seekable: Boolean get() = player.isCurrentMediaItemSeekable && !player.isCurrentMediaItemLive && player.duration > 0
 
+    /** A live stream with a rewind window (HLS with DVR), where the viewer can go back and forth. */
+    val liveSeekable: Boolean
+        get() = player.isCurrentMediaItemLive && player.isCurrentMediaItemSeekable && player.duration != C.TIME_UNSET && player.duration > 30_000
+
+    /** Back / forward work: movies, recordings, catch-up, and live streams with a rewind window. */
+    val canSeek: Boolean get() = seekable || liveSeekable
+
+    /**
+     * Live, but not at the live edge: paused, or rewound within the live window. (Streams that
+     * aren't marked live, like most IPTV TS channels, only fall behind by pausing.)
+     */
+    fun isBehindLive(): Boolean {
+        if (!player.playWhenReady) return true
+        if (!player.isCurrentMediaItemLive) return false
+        val offset = player.currentLiveOffset
+        if (offset == C.TIME_UNSET) return false
+        val target = player.currentMediaItem?.liveConfiguration?.targetOffsetMs?.takeIf { it != C.TIME_UNSET } ?: 0L
+        return offset - target > BEHIND_LIVE_MS
+    }
+
+    /** Jumps to the live edge and plays. */
+    fun goToLiveEdge() {
+        player.seekToDefaultPosition()
+        player.play()
+    }
+
     fun seekBy(deltaMs: Long) {
-        if (!seekable) return
+        if (!canSeek) return
         player.seekTo((player.currentPosition + deltaMs).coerceIn(0, player.duration))
     }
+
+    /** Playback speed (movies and shows): 1 = normal. */
+    var speed: Float
+        get() = player.playbackParameters.speed
+        set(v) {
+            player.setPlaybackSpeed(v)
+        }
 
     fun seekTo(positionMs: Long) {
         if (seekable) player.seekTo(positionMs.coerceIn(0, player.duration))
@@ -314,6 +347,8 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
 
     private companion object {
         const val MAX_RECONNECTS = 3
+        /** Further behind the live edge than this counts as "not live". */
+        const val BEHIND_LIVE_MS = 20_000L
     }
 }
 
@@ -407,9 +442,15 @@ fun VideoSurface(controller: StreamController, modifier: Modifier = Modifier, on
  * outside the normal view layers) this one fades with its container and fills its area like a
  * header image (cropped, never letterboxed).
  */
-@OptIn(UnstableApi::class)
 @Composable
 fun BackgroundVideoSurface(controller: StreamController, modifier: Modifier = Modifier) {
+    CroppedVideoSurface(controller.player, modifier)
+}
+
+/** [player]'s picture, center-cropped to fill [modifier]'s area (a TextureView, so it fades and clips). */
+@OptIn(UnstableApi::class)
+@Composable
+fun CroppedVideoSurface(player: Player, modifier: Modifier = Modifier) {
     AndroidView(
         factory = { ctx ->
             android.view.TextureView(ctx).apply {
@@ -435,14 +476,14 @@ fun BackgroundVideoSurface(controller: StreamController, modifier: Modifier = Mo
                 }
                 addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fit() }
                 tag = listener
-                listener.onVideoSizeChanged(controller.player.videoSize)
-                controller.player.addListener(listener)
-                controller.player.setVideoTextureView(this)
+                listener.onVideoSizeChanged(player.videoSize)
+                player.addListener(listener)
+                player.setVideoTextureView(this)
             }
         },
         onRelease = { view ->
-            (view.tag as? Player.Listener)?.let { controller.player.removeListener(it) }
-            controller.player.clearVideoTextureView(view)
+            (view.tag as? Player.Listener)?.let { player.removeListener(it) }
+            player.clearVideoTextureView(view)
         },
         modifier = modifier.clipToBounds(),
     )

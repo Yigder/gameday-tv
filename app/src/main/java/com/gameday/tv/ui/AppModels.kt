@@ -48,7 +48,13 @@ sealed class Screen(val key: String) {
     data object MultiviewBuilder : Screen("mv-builder")
 }
 
-enum class Tab(val label: String) { HOME("Home"), SPORTS("Sports"), LIVE("Live"), ON_DEMAND("On Demand"), LIBRARY("Library") }
+enum class Tab(val label: String) { SPORTS("Sports"), LIVE("Live"), ON_DEMAND("On Demand"), LIBRARY("Library");
+
+    companion object {
+        /** Where the app opens, and where Back from another tab goes. */
+        val FIRST = SPORTS
+    }
+}
 
 enum class BrowseKind(val label: String) { MOVIES("Movies"), SHOWS("Shows") }
 
@@ -131,7 +137,7 @@ data class Suggestion(val channel: Channel, val title: String, val subtitle: Str
 /** A live/upcoming event with its best channels, for the multiview sidebar. */
 data class EventStreams(val eventId: String, val title: String, val subtitle: String, val live: Boolean, val matches: List<ChannelMatch>)
 
-/** A ready-made multiview (Home "Multiview" row): games, or channels when [games] is empty. */
+/** A ready-made multiview (Sports "Watch in Multiview" row): games, or channels when [games] is empty. */
 data class MultiviewPreset(val key: String, val title: String, val subtitle: String, val games: List<Game>, val channels: List<Channel>)
 
 data class SearchResults(

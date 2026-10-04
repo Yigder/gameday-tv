@@ -2,8 +2,10 @@ package com.gameday.tv.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
@@ -67,6 +69,13 @@ object Http {
                 builder.post(body)
             }
             client.newCall(builder.build()).execute().use { resp -> HttpResult(resp.code, resp.body.string()) }
+        }
+
+    /** POSTs a JSON body; the response body is read whatever the status. */
+    suspend fun postJson(url: String, json: String, headers: Map<String, String> = emptyMap()): HttpResult =
+        withContext(Dispatchers.IO) {
+            val body = json.toRequestBody("application/json".toMediaType())
+            client.newCall(buildRequest(url, headers).post(body).build()).execute().use { resp -> HttpResult(resp.code, resp.body.string()) }
         }
 
     private fun buildRequest(url: String, headers: Map<String, String>): Request.Builder {

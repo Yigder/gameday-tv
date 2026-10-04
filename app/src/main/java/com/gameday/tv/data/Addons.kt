@@ -75,6 +75,8 @@ data class MetaPreview(
     val imdbRating: String?,
     val genres: List<String>,
     val posterShape: String = "poster",
+    /** YouTube ids of the title's trailers (Cinemeta's "trailers" and "trailerStreams"), best first. */
+    val trailers: List<String> = emptyList(),
 )
 
 data class MetaVideo(
@@ -283,7 +285,24 @@ object Addons {
             imdbRating = o.optString("imdbRating").clean(),
             genres = (o.optJSONArray("genres") ?: o.optJSONArray("genre"))?.strings().orEmpty(),
             posterShape = o.optString("posterShape").clean() ?: "poster",
+            trailers = parseTrailers(o),
         )
+    }
+
+    private val YOUTUBE_ID = Regex("^[A-Za-z0-9_-]{11}$")
+
+    /** Trailer ids from "trailers" ({source, type}) and "trailerStreams" ({ytId}); real trailers before teasers and clips. */
+    fun parseTrailers(o: JSONObject): List<String> {
+        val found = ArrayList<Pair<String, Int>>()
+        o.optJSONArray("trailers")?.objects()?.forEach { t ->
+            val id = t.optString("source").clean() ?: return@forEach
+            found += id to if (t.optString("type").clean()?.equals("Trailer", true) != false) 0 else 1
+        }
+        o.optJSONArray("trailerStreams")?.objects()?.forEach { t ->
+            val id = t.optString("ytId").clean() ?: return@forEach
+            found += id to if (t.optString("title").contains("teaser", true)) 1 else 0
+        }
+        return found.filter { YOUTUBE_ID.matches(it.first) }.sortedBy { it.second }.map { it.first }.distinct()
     }
 
     fun parseMeta(body: String, fallbackType: String): MetaDetail? {

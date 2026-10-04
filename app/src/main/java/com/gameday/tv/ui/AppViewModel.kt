@@ -92,7 +92,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val backStack = mutableStateListOf<Screen>(Screen.Splash)
     val screen: Screen get() = backStack.last()
     val canGoBack: Boolean get() = backStack.size > 1
-    var tab by mutableStateOf(Tab.HOME); private set
+    var tab by mutableStateOf(Tab.FIRST); private set
 
     /** Remembers the focused item per screen, so coming back lands where the viewer left off. */
     val focusMemory = HashMap<String, String>()
@@ -132,6 +132,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectTab(t: Tab, focusContent: Boolean = true) {
         tabWantsFocus = focusContent
+        if (t != tab) stopTrailer()
         tab = t
         heroFocus = null
         if (screen != Screen.Main) resetTo(Screen.Main)
@@ -242,7 +243,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun enterAccount(acct: AppAccount) {
         account = acct
-        tab = Tab.HOME
+        tab = Tab.FIRST
         tabWantsFocus = true
         val prefs = AccountPrefs(context, acct.id)
         accountPrefs = prefs
@@ -286,6 +287,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun leaveAccount() {
         stopMainStream()
+        stopTrailer()
         disconnectProviders()
         addons.leave()
         account = null
@@ -296,7 +298,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         playback = null
         clearMultiview()
         focusMemory.clear()
-        tab = Tab.HOME
+        tab = Tab.FIRST
     }
 
     /** @return an error message, or null when the account was deleted. */
@@ -338,7 +340,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             accountPrefs?.onboarded = true
             tabWantsFocus = true
-            tab = Tab.HOME
+            tab = Tab.FIRST
             resetTo(Screen.Main)
             showMessage("You're all set, ${account?.firstName ?: ""}")
         }
@@ -348,7 +350,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         selectProfileInternal(p)
         accountPrefs?.lastProfileId = p.id
         tabWantsFocus = true
-        tab = Tab.HOME
+        tab = Tab.FIRST
         resetTo(Screen.Main)
     }
 
@@ -408,6 +410,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         autoplayNext = pp.autoplayNext
         scoreDelaySec = pp.scoreDelaySec
         backgroundVideo = pp.backgroundVideo
+        trailerPreviews = pp.trailerPreviews
         guideFilter = pp.guideFilter
         subtitleStyle = pp.subtitleStyle
         subtitleLanguage = pp.subtitleLanguage
@@ -439,6 +442,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var scoreDelaySec by mutableIntStateOf(60); private set
     /** "sound", "muted" or "off". */
     var backgroundVideo by mutableStateOf("sound"); private set
+    /** On Demand trailers on the focused card: "muted", "sound" or "off". */
+    var trailerPreviews by mutableStateOf("muted"); private set
     var guideFilter by mutableStateOf("sports"); private set
     var subtitleStyle by mutableStateOf(SubtitleStyle()); private set
     /** ISO 639-1 code of the subtitle language picked automatically. */
@@ -691,6 +696,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         profilePrefs?.scoreDelaySec = seconds
         scoreDelaySec = seconds
         alertedScores.clear()
+    }
+
+    fun updateTrailerPreviews(mode: String) {
+        profilePrefs?.trailerPreviews = mode
+        trailerPreviews = mode
+        if (mode == "off") stopTrailer() else trailerOrNull?.volume = if (mode == "sound") 1f else 0f
     }
 
     fun updateBackgroundVideo(mode: String) {
@@ -1287,9 +1298,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             showMessage("This airing isn't available to replay")
             return
         }
+        (playback as? PlayRequest.Live)?.let { liveBeforeCatchup = it }
         playback = PlayRequest.Catchup(channel, program, url)
         if (screen !is Screen.Player) navigate(Screen.Player)
     }
+
+    /** The live channel list catch-up was started from, so "Live" returns to it (and CH+/CH− still work). */
+    private var liveBeforeCatchup: PlayRequest.Live? = null
 
     fun playMovie(movie: Movie) {
         val url = sourceForId(movie.id)?.movieUrl(movie) ?: movie.url ?: return
@@ -1360,6 +1375,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val hasMainStream: Boolean get() = mainStreamOrNull != null
 
+    // ---- On Demand trailers (their own small player) ----
+
+    private var trailerOrNull: TrailerController? = null
+
+    /** Plays the focused title's trailer in On Demand. */
+    val trailer: TrailerController
+        get() = trailerOrNull ?: TrailerController(context).also { trailerOrNull = it }
+
+    fun stopTrailer() {
+        trailerOrNull?.stop()
+    }
+
     /** The live channel playing (or last played) in the shared player, shown behind the menus. */
     var backgroundChannel by mutableStateOf<Channel?>(null); private set
 
@@ -1402,6 +1429,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun onScreenChanged(s: Screen) {
         val from = lastScreen
         lastScreen = s
+        stopTrailer()
         val main = mainStreamOrNull ?: return
         when {
             s == Screen.Player -> main.volume = 1f
@@ -1416,6 +1444,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         mainStreamOrNull?.release()
         mainStreamOrNull = null
+        trailerOrNull?.release()
+        trailerOrNull = null
         super.onCleared()
     }
 
@@ -1459,7 +1489,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** From catch-up back to the live channel. */
     fun goLive() {
         val p = playback as? PlayRequest.Catchup ?: return
-        playback = PlayRequest.Live(listOf(p.channel), 0, null)
+        val before = liveBeforeCatchup?.takeIf { it.current?.id == p.channel.id }
+        playback = before ?: PlayRequest.Live(listOf(p.channel), 0, null)
     }
 
     // =============================================================================================
@@ -1595,11 +1626,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Home's "Watch in Multiview" row (refreshed by Home as games change). */
-    var homePresets by mutableStateOf<List<MultiviewPreset>>(emptyList())
+    /** Sports' "Watch in Multiview" row (refreshed by Sports as games change). */
+    var multiviewRow by mutableStateOf<List<MultiviewPreset>>(emptyList())
 
     /**
-     * Ready-made multiviews for Home, like YouTube TV's: your teams, the top live games, close
+     * Ready-made multiviews for Sports, like YouTube TV's: your teams, the top live games, close
      * games, each league with several games on, the main sports networks, and your channels.
      */
     suspend fun multiviewPresets(): List<MultiviewPreset> {

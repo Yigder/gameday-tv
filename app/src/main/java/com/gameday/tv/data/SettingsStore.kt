@@ -289,6 +289,9 @@ class ProfilePrefs(context: Context, accountId: String, profileId: String) {
     /** Live video behind the menus, like YouTube TV: "sound", "muted" or "off". */
     var backgroundVideo: String by prefs.string(K_BG_VIDEO, "sound")
 
+    /** On Demand trailers on the focused card (like Nuvio): "muted", "sound" or "off". */
+    var trailerPreviews: String by prefs.string(K_TRAILERS, "muted")
+
     /** Live guide filter: "all", "sports", "favorites", "recent" or "group:<name>". */
     var guideFilter: String by prefs.string(K_GUIDE_FILTER, "sports")
 
@@ -344,6 +347,7 @@ class ProfilePrefs(context: Context, accountId: String, profileId: String) {
         private const val K_AUTOPLAY = "autoplay_next"
         private const val K_SCORE_DELAY = "score_delay_sec"
         private const val K_BG_VIDEO = "background_video"
+        private const val K_TRAILERS = "trailer_previews"
         private const val K_GUIDE_FILTER = "guide_filter"
         private const val K_SUB_STYLE = "subtitle_style"
         private const val K_SUB_LANG = "subtitle_language"
