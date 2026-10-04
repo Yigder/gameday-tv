@@ -1083,6 +1083,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** True for NFL RedZone, which gets a score bug for every live NFL game. */
     fun isRedZone(channel: Channel?): Boolean = channel != null && ChannelMatcher.isRedZone(channel.name)
 
+    /** RedZone channels in the lineup, best picture first. */
+    fun redZoneChannels(): List<Channel> {
+        val cat = catalog ?: return emptyList()
+        return cat.channels.filter { ChannelMatcher.isRedZone(it.name) }
+            .sortedWith { a, b -> StreamQuality.BEST_FIRST.compare(streamQuality(a), streamQuality(b)) }
+    }
+
     /** Live NFL games, earliest kickoff first (RedZone's score bugs). */
     val liveNflGames: List<Game>
         get() = games.filter { it.league.key == "nfl" && it.state == GameState.LIVE }.sortedBy { it.startMillis }

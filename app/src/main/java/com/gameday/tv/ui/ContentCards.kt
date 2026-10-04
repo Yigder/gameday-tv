@@ -85,6 +85,31 @@ fun ChannelCard(
     ) { ChannelThumb(channel, program, now) }
 }
 
+/** NFL RedZone in "Live now": plays the best RedZone channel (the others are a CH+/CH− away). */
+@Composable
+fun RedZoneCard(vm: AppViewModel, channels: List<Channel>, liveGames: Int, screenKey: String, onHero: (HeroInfo) -> Unit = {}) {
+    val channel = channels.first()
+    val subtitle = "NFL · $liveGames ${if (liveGames == 1) "game" else "games"} live"
+    MediaCard(
+        title = "NFL RedZone",
+        subtitle = subtitle,
+        onClick = { vm.playChannel(channel, channels) },
+        onLongClick = { channelMenu(vm, channel, channels) },
+        onFocus = { onHero(HeroInfo("NFL RedZone", listOf(subtitle, cleanChannelName(channel.name)), "Every touchdown from every Sunday game, with a score bug for each live game.", live = true, channel = channel)) },
+        modifier = Modifier.rememberFocus(vm, screenKey, "redzone"),
+    ) {
+        Box(
+            Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFFB3001B), Color(0xFF4A0010)))),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("RED ZONE", fontSize = 22.sp, fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 1.sp)
+                Text("$liveGames LIVE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xCCFFFFFF))
+            }
+        }
+    }
+}
+
 @Composable
 fun ResumeCard(vm: AppViewModel, point: ResumePoint, screenKey: String, onHero: (HeroInfo) -> Unit = {}) {
     MediaCard(

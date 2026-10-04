@@ -6,6 +6,7 @@ A live TV and sports app for Android TV, built around **your IPTV service** and 
 
 ## What's new in 2.5
 
+- **RedZone card in Live now.** While NFL games are live, Sports › Live now starts with an NFL RedZone card that plays your best RedZone channel.
 - **NFL RedZone score bugs.** On a RedZone channel, every live NFL game gets a mini score bug in a thin strip across the top (up to 8 a row, so the picture stays clear). ▲ shows or hides them, like a single game's bug. A game's bug lights up when its score changes. Works in Multiview too.
 - **Best streams first.** A game's channels are sorted by frame rate, then resolution, within how well they match the game. Quality comes from tags in the channel name ("FHD 60FPS", "720p60", "4K") and, after you've watched a channel, from what it actually played at. "Watch" starts the best one, and the quality (e.g. "1080p · 60 fps") shows on each channel.
 - **Real frame rate in Video stats.** Frame rate is now counted from the frames actually shown, so it appears on IPTV channels that don't report one (most of them).

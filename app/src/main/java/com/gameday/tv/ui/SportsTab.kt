@@ -96,6 +96,9 @@ fun SportsTab(vm: AppViewModel) {
     val finals = (pool.filter { it.state == GameState.FINAL }.map { SportsItem.G(it) } + tours.filter { it.state == GameState.FINAL }.map { SportsItem.T(it) })
         .sortedByDescending { it.start }
 
+    val liveNfl = pool.count { it.league.key == "nfl" && it.state == GameState.LIVE }
+    val redZone = remember(vm.catalog) { vm.redZoneChannels() }
+
     var teams by remember(filter) { mutableStateOf<List<FavoriteTeam>>(emptyList()) }
     var channels by remember(filter) { mutableStateOf<List<Channel>>(emptyList()) }
     LaunchedEffect(filter, vm.catalog) {
@@ -156,7 +159,13 @@ fun SportsTab(vm: AppViewModel) {
                         item(key = "provider") { ProviderBanner(vm) }
                     }
                     if (live.isNotEmpty()) {
-                        cardRow("live", "Live now", nav) { sportsItems(vm, live, screenKey, onHero, "l:") }
+                        cardRow("live", "Live now", nav) {
+                            // RedZone first while NFL games in this view are live.
+                            if (liveNfl > 0 && redZone.isNotEmpty()) {
+                                item(key = "redzone") { RedZoneCard(vm, redZone, liveNfl, screenKey, onHero) }
+                            }
+                            sportsItems(vm, live, screenKey, onHero, "l:")
+                        }
                     }
                     if (filter == "all" && presets.isNotEmpty()) {
                         cardRow("mv", "Watch in Multiview", nav) {
