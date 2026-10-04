@@ -772,11 +772,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         accountPrefs?.apply { dvrCapGb = capGb; dvrKeepDays = keepDays; dvrPaddingMin = paddingMin }
     }
 
-    fun resetDecoderLimit() {
-        DecoderBudget.reset()
-        showMessage("Video decoder limit reset")
-    }
-
     /** Per-stream decoding choices, keyed by [DecoderSlot]. Saved for the device, not the account. */
     private val decoderModes = mutableStateMapOf<String, DecoderMode>()
 
@@ -1434,6 +1429,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** The card focused on the main tabs: drives the header and which channel previews. */
     var heroFocus by mutableStateOf<HeroInfo?>(null)
 
+    // ---- the player's guide (hold Back): kept while the app runs, so it reopens the same way ----
+
+    /** 0 = channels, 1 = sports. */
+    var guideTab by mutableIntStateOf(0)
+    /** "fav", "recent", "all", "sports" or "g:<group>"; null = the playing channel's group. */
+    var guideChannelFilter by mutableStateOf<String?>(null)
+    /** "all", "mine" or a sport's key, like the Sports tab's chips. */
+    var guideSportsFilter by mutableStateOf("all")
+
     /** Plays [channel] behind the menus (muted or with sound, per Settings). */
     fun previewChannel(channel: Channel) {
         if (backgroundVideo == "off" || iptv !is IptvStatus.Ready) return
@@ -1472,6 +1476,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val main = mainStreamOrNull ?: return
         when {
             s == Screen.Player -> main.volume = 1f
+            // A Multiview screen carrying on from full screen keeps the shared player (its screen
+            // sets the volume); anything else it was playing would only hold a connection.
+            s == Screen.Multiview -> {
+                val keep = multiview.firstOrNull { it?.id == multiviewMainId }?.let { multiviewUsesMain(it) } == true
+                if (!keep) {
+                    multiviewMainId = null
+                    stopMainStream()
+                }
+            }
             s == Screen.Main && backgroundVideo != "off" && backgroundChannel != null && tab != Tab.LIBRARY && tab != Tab.ON_DEMAND -> {
                 main.volume = if (backgroundVideo == "sound") 1f else 0f
                 if (from == Screen.Player) keepBackgroundUntil = System.currentTimeMillis() + 4_000
@@ -1564,6 +1577,92 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         for (i in multiview.indices) multiview[i] = null
         multiviewLayout = MultiviewLayout.ONE
         multiviewAudio = 0
+        multiviewMainId = null
+    }
+
+    /**
+     * The Multiview channel that plays in the shared player: it carried on from full screen (held
+     * OK) instead of reconnecting. Its screen uses [mainStream] while that is still playing it.
+     */
+    var multiviewMainId by mutableStateOf<String?>(null); private set
+
+    /** The screen to fill first when Multiview opens from a held OK (null: none). */
+    var multiviewPickSlot by mutableStateOf<Int?>(null)
+
+    /** [mainStream] is playing [channel] for its Multiview screen. */
+    fun multiviewUsesMain(channel: Channel): Boolean =
+        channel.id == multiviewMainId && mainStreamOrNull?.currentKey == channel.id
+
+    /** The shared player's channel left Multiview: stop it, so it stops using a connection. */
+    fun releaseMultiviewMain() {
+        if (multiviewMainId == null) return
+        multiviewMainId = null
+        stopMainStream()
+    }
+
+    /**
+     * Held OK in the player, like TiviMate: Multiview with [channel] carrying on (no reconnect)
+     * and a second screen to fill. Screens already in a running Multiview keep playing too.
+     */
+    fun quickMultiview(channel: Channel) {
+        if (iptv !is IptvStatus.Ready) {
+            showMessage("Connect a TV provider in Settings to watch")
+            return
+        }
+        val onScreen = (0 until multiviewLayout.screens).any { multiview[it]?.id == channel.id }
+        when {
+            multiviewCount == 0 -> {
+                clearMultiview()
+                multiview[0] = channel
+                multiviewLayout = MultiviewLayout.TWO
+                multiviewAudio = 0
+            }
+            !onScreen -> addToMultiview(channel)
+        }
+        multiviewMainId = channel.id
+        multiviewPickSlot = firstEmptyMultiviewSlot()
+        openQuickMultiview()
+    }
+
+    /**
+     * From the player's guide: Multiview with [current] (the live channel playing) carrying on and
+     * the event's best channel beside it. [current] null (catch-up): an ordinary Multiview start.
+     */
+    fun multiviewWithEvent(game: Game?, tournament: Tournament?, current: Channel?) {
+        viewModelScope.launch {
+            val matches = when {
+                game != null -> matchChannels(game)
+                tournament != null -> matchChannels(tournament)
+                else -> emptyList()
+            }
+            val add = matches.firstOrNull()?.channel
+            if (add == null) {
+                showMessage("No channel found for this game")
+                return@launch
+            }
+            if (current == null) {
+                multiviewWith(add)
+                return@launch
+            }
+            // The current channel carries on; the game's channel fills the next screen (no picker).
+            quickMultiview(current)
+            if (screen != Screen.Multiview || add.id == current.id) return@launch
+            val slot = multiviewPickSlot
+            multiviewPickSlot = null
+            when {
+                (0 until multiviewLayout.screens).any { multiview[it]?.id == add.id } -> Unit
+                slot != null -> setMultiviewSlot(slot, add)
+                else -> addToMultiview(add)
+            }
+        }
+    }
+
+    private fun openQuickMultiview() {
+        when (screen) {
+            is Screen.Player -> replace(Screen.Multiview)
+            is Screen.Multiview -> Unit
+            else -> navigate(Screen.Multiview)
+        }
     }
 
     /** YouTube TV style: pick up to four, then watch them together. */
@@ -1634,6 +1733,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         // Free the shared player's connection and decoder before the screens start.
+        multiviewMainId = null
         stopMainStream()
         // Never stack a full-screen player under multiview: it would hold an extra connection.
         when (screen) {
@@ -1643,9 +1743,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Back from Multiview: one screen again, full screen, with the channel you were listening to.
+     * The other screens close (CH+ / CH− still go through them). A channel that carried on from
+     * full screen keeps playing; the others reconnect in the full-screen player.
+     */
+    fun leaveMultiview() {
+        val channels = (0 until multiviewLayout.screens).mapNotNull { multiview[it] }
+        val ch = multiview.getOrNull(multiviewAudio)?.takeIf { it in channels } ?: channels.firstOrNull()
+        if (ch == null || iptv !is IptvStatus.Ready) {
+            clearMultiview()
+            back()
+            return
+        }
+        clearMultiview()
+        playback = PlayRequest.Live(channels, channels.indexOf(ch), null)
+        replace(Screen.Player)
+    }
+
     fun fullscreenFromMultiview(slot: Int) {
         val channels = (0 until multiviewLayout.screens).mapNotNull { multiview[it] }
         val ch = multiview[slot] ?: return
+        // Coming back, this screen carries on in the shared player instead of reconnecting.
+        multiviewMainId = ch.id
         play(channels, channels.indexOf(ch), null)
     }
 

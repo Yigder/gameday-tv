@@ -77,11 +77,11 @@ private const val EXPAND_AFTER_MS = 900L
 @Composable
 fun OnDemandTab(vm: AppViewModel) {
     val screenKey = "main:${Tab.ON_DEMAND}"
-    val chips = remember { FocusRequester() }
-    if (vm.tabWantsFocus) InitialFocus(vm, screenKey, chips)
+    val hero = remember { FocusRequester() }
+    if (vm.tabWantsFocus) InitialFocus(vm, screenKey, hero)
     val listState = rememberLazyListState()
     val nav = rememberRowNav(listState)
-    BackToTop(listState, chips)
+    BackToTop(listState, hero)
 
     val addons = vm.addons
     val rows = addons.rows
@@ -110,19 +110,21 @@ fun OnDemandTab(vm: AppViewModel) {
         if (addons.hasStreamAddons) null else "Add a streaming add-on in Settings › Add-ons to play titles.",
     )
 
+    // The header itself can be selected: it opens the title it shows.
+    val openHero: () -> Unit = {
+        when {
+            firstTitle != null -> vm.navigate(Screen.AddonDetail(firstTitle.type, firstTitle.id))
+            addons.installed.isEmpty() || !addons.hasStreamAddons -> vm.navigate(Screen.AddonInstall)
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
         OnDemandBackdrop(vm, defaultHero)
         Column(Modifier.fillMaxSize()) {
-            OnDemandHeroText(vm, defaultHero, Modifier.fillMaxWidth().height(262.dp).padding(top = 64.dp))
+            OnDemandHeroText(vm, defaultHero, Modifier.fillMaxWidth().height(262.dp).padding(top = 64.dp), hero, openHero)
             Box(Modifier.weight(1f)) {
                 PivotScroll(offset = ROW_TITLE) {
-                    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(top = 4.dp, bottom = 260.dp)) {
-                        item(key = "chips") {
-                            // Movies and shows share the rows; add-ons are managed in Settings › Add-ons.
-                            Row(Modifier.padding(start = 48.dp, end = 48.dp, bottom = 12.dp).onFocusChanged { if (it.hasFocus) vm.heroFocus = null }) {
-                                Chip("Search", false, { vm.navigate(Screen.OnDemandSearch) }, Modifier.focusRequester(chips), icon = Icons.Search)
-                            }
-                        }
+                    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(top = 16.dp, bottom = 260.dp)) {
                         if (addons.installed.isEmpty() && !hasProvider) {
                             item(key = "none") {
                                 EmptyState("No add-ons yet", "Add Stremio-compatible add-ons (catalogs like Cinemeta, sources like Comet) to browse and stream movies and shows.") {
@@ -235,17 +237,47 @@ private fun OnDemandBackdrop(vm: AppViewModel, default: HeroInfo) {
 }
 
 @Composable
-private fun OnDemandHeroText(vm: AppViewModel, default: HeroInfo, modifier: Modifier) {
+private fun OnDemandHeroText(vm: AppViewModel, default: HeroInfo, modifier: Modifier, focus: FocusRequester, onClick: () -> Unit) {
     val h = settledHero(vm, default)
+    val shape = RoundedCornerShape(12.dp)
+    Box(modifier) {
+        // Focusable around the text (outside the crossfade, so focus survives the title changing).
+        Surface(
+            onClick = onClick,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth(0.5f)
+                .padding(start = 34.dp, bottom = 2.dp)
+                .focusRequester(focus)
+                // Resting here shows the header's own title, which is what OK opens.
+                .onFocusChanged { if (it.isFocused) vm.heroFocus = null },
+            shape = ClickableSurfaceDefaults.shape(shape = shape),
+            colors = ClickableSurfaceDefaults.colors(
+                containerColor = Color.Transparent,
+                contentColor = AppColors.Text,
+                focusedContainerColor = Color(0x1AFFFFFF),
+                focusedContentColor = AppColors.Text,
+                pressedContainerColor = Color(0x26FFFFFF),
+                pressedContentColor = AppColors.Text,
+            ),
+            scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+            border = ClickableSurfaceDefaults.border(focusedBorder = Border(BorderStroke(2.dp, AppColors.Focus), shape = shape)),
+        ) {
+            HeroTextContent(h)
+        }
+    }
+}
+
+@Composable
+private fun HeroTextContent(h: HeroInfo) {
     AnimatedContent(
         targetState = h,
         transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(180)) },
         contentKey = { it.title + it.meta.joinToString() },
-        modifier = modifier,
         label = "odHero",
     ) { info ->
-        Box(Modifier.fillMaxSize()) {
-            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth(0.48f).padding(start = 48.dp, bottom = 12.dp)) {
+        Box(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp)) {
                 var logoFailed by remember(info.logo) { mutableStateOf(false) }
                 if (info.logo != null && !logoFailed) {
                     AsyncImage(

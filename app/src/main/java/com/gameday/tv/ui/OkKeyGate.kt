@@ -42,6 +42,40 @@ object OkKeyGate {
 }
 
 /**
+ * Holding Back. A screen that has something for it (the player's guide) sets [action]; holding Back
+ * then runs it once Back starts repeating, and the release is dropped so it doesn't also go back.
+ * Without an [action], a held Back is an ordinary Back on release.
+ */
+object BackHold {
+    @Volatile
+    var action: (() -> Unit)? = null
+
+    @Volatile
+    private var fired = false
+
+    /** Returns true if the event was used here (the activity must not treat it as Back). */
+    fun onBackKey(action: Int, repeatCount: Int): Boolean = when {
+        action == KeyEvent.ACTION_DOWN && repeatCount == 0 -> {
+            fired = false
+            false
+        }
+        action == KeyEvent.ACTION_DOWN -> {
+            val run = this.action
+            if (!fired && run != null) {
+                fired = true
+                run()
+            }
+            fired
+        }
+        action == KeyEvent.ACTION_UP && fired -> {
+            fired = false
+            true
+        }
+        else -> false
+    }
+}
+
+/**
  * When the viewer last pressed a D-pad direction. Tells focus the viewer moved (open the tab they
  * landed on) apart from focus Android moved by itself after the focused item disappeared (don't).
  */

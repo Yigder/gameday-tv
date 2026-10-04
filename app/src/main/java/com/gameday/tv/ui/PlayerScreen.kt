@@ -246,15 +246,28 @@ fun PlayerScreen(vm: AppViewModel) {
     fun poke() { nonce++ }
     fun showControls() { controls = true; poke() }
 
-    LaunchedEffect(now.key) { showControls() }
+    // Hold Back (live TV): the guide, channels and games over the video, which keeps playing.
+    var guide by remember { mutableStateOf(false) }
+    val guideAvailable = req is PlayRequest.Live || req is PlayRequest.Catchup
+    DisposableEffect(guideAvailable) {
+        val open: () -> Unit = {
+            panel = Panel.None
+            controls = false
+            guide = true
+        }
+        if (guideAvailable) BackHold.action = open
+        onDispose { if (BackHold.action === open) BackHold.action = null }
+    }
+
+    LaunchedEffect(now.key) { if (!guide) showControls() }
     LaunchedEffect(nonce, controls, panel) {
         if (!controls || panel != Panel.None) return@LaunchedEffect
         delay(6_000)
         controls = false
     }
-    LaunchedEffect(controls, panel) {
+    LaunchedEffect(controls, panel, guide) {
         when {
-            panel != Panel.None -> Unit
+            guide || panel != Panel.None -> Unit
             controls -> playFocus.requestFocusSafely(40)
             else -> rootFocus.requestFocusSafely(40)
         }
@@ -267,6 +280,8 @@ fun PlayerScreen(vm: AppViewModel) {
         }
     }
     BackHandler(enabled = panel == Panel.None && controls) { controls = false }
+    // Declared last, so it goes first.
+    BackHandler(enabled = guide) { guide = false }
 
     val live = req is PlayRequest.Live
     val channel = now.channel
@@ -282,7 +297,7 @@ fun PlayerScreen(vm: AppViewModel) {
             }
             .focusRequester(rootFocus)
             .onKeyEvent { ev ->
-                if (panel != Panel.None) return@onKeyEvent false
+                if (panel != Panel.None || guide) return@onKeyEvent false
                 // Media keys work whether or not the controls are showing.
                 if (ev.type == KeyEventType.KeyDown) {
                     when (ev.key) {
@@ -296,14 +311,15 @@ fun PlayerScreen(vm: AppViewModel) {
                     }
                 }
                 if (controls) return@onKeyEvent false
-                // Controls hidden: OK shows them (and the score); hold OK opens Multiview.
+                // Controls hidden: OK shows them (and the score); hold OK opens Multiview with this
+                // channel carrying on, like TiviMate.
                 if (ev.key in OK_KEYS) {
                     when {
                         ev.type == KeyEventType.KeyDown && ev.nativeKeyEvent.repeatCount == 0 -> okLongPressed = false
                         ev.type == KeyEventType.KeyDown && ev.isLongPressRepeat() && channel != null && live -> {
                             okLongPressed = true
                             OkKeyGate.swallowRelease()
-                            vm.multiviewWith(channel)
+                            vm.quickMultiview(channel)
                         }
                         ev.type == KeyEventType.KeyUp -> if (!okLongPressed) {
                             if (stream.error != null) stream.retry()
@@ -335,7 +351,7 @@ fun PlayerScreen(vm: AppViewModel) {
             .pointerInput(now.key) {
                 detectTapGestures(
                     onTap = { if (controls) controls = false else showControls() },
-                    onLongPress = { if (channel != null && live) vm.multiviewWith(channel) },
+                    onLongPress = { if (channel != null && live) vm.quickMultiview(channel) },
                 )
             },
     ) {
@@ -462,6 +478,15 @@ fun PlayerScreen(vm: AppViewModel) {
         }
 
         SidePanel(panel == Panel.SubtitleStyle) { SubtitleStylePanel(vm) }
+
+        AnimatedVisibility(
+            visible = guide,
+            enter = fadeIn(tween(180)) + slideInHorizontally(tween(240)) { -it / 8 },
+            exit = fadeOut(tween(160)),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            PlayerGuide(vm, channel, live, onClose = { guide = false })
+        }
     }
 }
 
@@ -548,6 +573,7 @@ private fun LiveControls(
     }
     if (req is PlayRequest.Live && channel != null) LaunchedEffect(channel.id) { vm.requestEpg(channel) }
     val atLive = catchup == null && !behindLive
+    var more by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
         // Top: channel and clock.
@@ -628,18 +654,6 @@ private fun LiveControls(
                 if (channel != null && channel.archiveDays > 0) {
                     IconCircleButton(Icons.History, if (catchup != null) "Catch-up" else "Start over & catch-up", { onPanel(Panel.CatchUp) }, active = catchup != null)
                 }
-                if (req is PlayRequest.Live && channel != null) {
-                    val game = req.eventId?.let { vm.gameById(it) }
-                    val rec = game?.let { vm.recordingForEvent(it.id) }
-                    IconCircleButton(Icons.Record, if (rec != null) "Recording" else "Record", {
-                        when {
-                            rec != null -> recordingMenu(vm, rec)
-                            game != null -> vm.recordGame(game, channel)
-                            else -> recordMenu(vm, channel)
-                        }
-                    }, active = rec != null, tint = if (rec != null) AppColors.Live else null)
-                    IconCircleButton(Icons.Multiview, "Multiview", { vm.multiviewWith(channel) })
-                }
                 if (hasStats) IconCircleButton(Icons.Stats, "Game stats", { onPanel(Panel.Stats) })
                 IconCircleButton(Icons.Captions, if (vm.captions) "Captions on" else "Captions off", {
                     val on = !vm.captions
@@ -647,12 +661,26 @@ private fun LiveControls(
                     val any = stream.tracks.groups.any { it.type == C.TRACK_TYPE_TEXT } || subs.tracks.isNotEmpty()
                     if (on && !any && !subs.searching) vm.showMessage("No captions found for this channel")
                 }, active = vm.captions)
-                IconCircleButton(Icons.Settings, "Settings", { onPanel(Panel.Settings) })
-                IconCircleButton(Icons.VideoStats, "Video stats", onVideoStats, active = videoStats)
-                if (channel != null && req is PlayRequest.Live) {
-                    val fav = vm.isFavoriteChannel(channel.id)
-                    IconCircleButton(Icons.Star, if (fav) "Favorite" else "Add favorite", { vm.toggleFavoriteChannel(channel) }, active = fav)
+                // Everything else waits behind More, like the movie player.
+                if (more) {
+                    if (req is PlayRequest.Live && channel != null) {
+                        val game = req.eventId?.let { vm.gameById(it) }
+                        val rec = game?.let { vm.recordingForEvent(it.id) }
+                        IconCircleButton(Icons.Record, if (rec != null) "Recording" else "Record", {
+                            when {
+                                rec != null -> recordingMenu(vm, rec)
+                                game != null -> vm.recordGame(game, channel)
+                                else -> recordMenu(vm, channel)
+                            }
+                        }, active = rec != null, tint = if (rec != null) AppColors.Live else null)
+                        IconCircleButton(Icons.Multiview, "Multiview", { vm.multiviewWith(channel) })
+                        val fav = vm.isFavoriteChannel(channel.id)
+                        IconCircleButton(Icons.Star, if (fav) "Favorite" else "Add favorite", { vm.toggleFavoriteChannel(channel) }, active = fav)
+                    }
+                    IconCircleButton(Icons.VideoStats, "Video stats", onVideoStats, active = videoStats)
+                    IconCircleButton(Icons.Settings, "Settings", { onPanel(Panel.Settings) })
                 }
+                IconCircleButton(if (more) Icons.ChevronLeft else Icons.ChevronRight, if (more) "Less" else "More", { more = !more })
             }
             }
 
@@ -1029,9 +1057,13 @@ private fun SettingsPanel(vm: AppViewModel, stream: StreamController, live: Bool
         item(key = "dec") {
             val mode = vm.decoderMode(DecoderSlot.PLAYER)
             SettingRow("Video decoding", { vm.setDecoderMode(DecoderSlot.PLAYER, mode.next()) },
-                subtitle = decodingStatus(mode, stream.softwareDecoding), value = mode.label)
+                subtitle = decodingStatus(mode), value = mode.label)
         }
         if (live) {
+            item(key = "scoreDelay") {
+                SliderRow("Score delay", vm.scoreDelaySec, SCORE_DELAY_RANGE, SCORE_DELAY_STEP, vm::updateScoreDelay,
+                    subtitle = "How long the score bug waits, to match this stream", label = ::delayLabel)
+            }
             item(key = "format") {
                 SettingRow("Stream format", { vm.updateStreamFormat(if (vm.streamFormat == StreamFormat.TS) StreamFormat.HLS else StreamFormat.TS) },
                     subtitle = "Switch if this channel stutters or won't play", value = vm.streamFormat.label)

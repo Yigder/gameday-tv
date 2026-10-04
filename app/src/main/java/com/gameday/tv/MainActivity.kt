@@ -31,6 +31,7 @@ import com.gameday.tv.ui.AddonBrowseScreen
 import com.gameday.tv.ui.AddonDetailScreen
 import com.gameday.tv.ui.AddonInstallScreen
 import com.gameday.tv.ui.AppViewModel
+import com.gameday.tv.ui.BackHold
 import com.gameday.tv.ui.DisplayModes
 import com.gameday.tv.ui.FollowAppLifecycle
 import com.gameday.tv.ui.KeyActivity
@@ -88,6 +89,8 @@ class MainActivity : ComponentActivity() {
         // took two presses to close. Back goes straight to the back handlers instead. (The on-screen
         // keyboard still takes Back first: the IME sees it before the activity does.)
         if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            // Holding Back can open something instead (the player's guide).
+            if (BackHold.onBackKey(event.action, event.repeatCount)) return true
             if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) onBackPressedDispatcher.onBackPressed()
             return true
         }

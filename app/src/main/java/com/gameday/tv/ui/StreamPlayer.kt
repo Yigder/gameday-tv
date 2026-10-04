@@ -53,10 +53,9 @@ import kotlinx.coroutines.delay
 @Stable
 @OptIn(UnstableApi::class)
 class StreamController(context: Context, handleAudioFocus: Boolean) {
-    /** Decode video on the CPU: set when this device is out of hardware decoders (see [DecoderBudget]). */
+    /** Decode video on the CPU (this stream's position is set to Software). */
     @Volatile
     private var preferSoftware = false
-    private var forcedSoftware = false
 
     private val dataSource = OkHttpDataSource.Factory(Http.client)
 
@@ -65,8 +64,8 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
     /** True while this stream is decoding in software. */
     var softwareDecoding by mutableStateOf(false); private set
 
-    /** Hardware, software, or automatic: chosen per stream in Settings › Playback or the stream's menu. */
-    var decoderMode by mutableStateOf(DecoderMode.AUTO); private set
+    /** Hardware or software: chosen per stream in Settings › Playback or the stream's menu. */
+    var decoderMode by mutableStateOf(DecoderMode.HARDWARE); private set
 
     var buffering by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
@@ -152,23 +151,16 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
                         player.seekToDefaultPosition()
                         player.prepare()
                     }
-                    isDecoderError(e) && !preferSoftware -> {
-                        // Another stream took this one's hardware decoder. Don't take it back (that
-                        // would kill the other stream); continue in software. In Automatic mode,
-                        // also remember the limit; a stream forced to hardware says nothing about it.
-                        if (decoderMode == DecoderMode.AUTO) DecoderBudget.learnFromFailure(this@StreamController)
-                        else DecoderBudget.release(this@StreamController)
-                        forcedSoftware = true
-                        start()
-                    }
                     isDecoderError(e) -> {
+                        // No switching to the other kind of decoding: the viewer chose this one.
+                        DecoderBudget.release(this@StreamController)
                         reconnecting = false
                         player.stop()
                         buffering = false
                         error = if (decoderMode == DecoderMode.SOFTWARE) {
-                            "Software decoding can't play this stream. Set this screen's video decoding to Hardware or Automatic."
+                            "Software decoding can't keep up with this stream. Set this screen's video decoding to Hardware."
                         } else {
-                            "This TV can't decode another video right now. Try a layout with fewer screens."
+                            "This TV has no hardware video decoder free for another stream. Use fewer screens, or set this screen's video decoding to Software."
                         }
                     }
                     else -> fallback(describe(e))
@@ -198,7 +190,6 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
     fun applyDecoderMode(mode: DecoderMode) {
         if (mode == decoderMode) return
         decoderMode = mode
-        forcedSoftware = false
         if (key == null) return
         if (seekable) startAt = player.currentPosition
         resetReconnects()
@@ -285,10 +276,15 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
             player.volume = v
         }
 
-    /** Caps resolution for small tiles, which saves bandwidth and decoder capacity on adaptive (HLS) streams. */
-    fun setMaxVideoSize(width: Int, height: Int) {
+    /**
+     * Caps resolution and frame rate for small tiles. Only adaptive (HLS) streams that offer
+     * smaller or 30 fps versions can follow it; a single-version stream (most TS channels) plays
+     * as it is, because every frame has to be decoded either way.
+     */
+    fun setMaxVideoSize(width: Int, height: Int, frameRate: Int = Int.MAX_VALUE) {
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .setMaxVideoSize(width, height)
+            .setMaxVideoFrameRate(frameRate)
             .build()
     }
 
@@ -332,14 +328,9 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
             error = "This channel has no stream address."
             return
         }
-        // Claim a hardware decoder if the device has one free (or this stream insists on one);
-        // otherwise decode in software.
+        // Decode the way this stream's position is set; never switched automatically.
         DecoderBudget.release(this)
-        preferSoftware = when (decoderMode) {
-            DecoderMode.SOFTWARE -> true
-            DecoderMode.HARDWARE -> forcedSoftware
-            DecoderMode.AUTO -> forcedSoftware || !DecoderBudget.canUseHardware()
-        }
+        preferSoftware = decoderMode == DecoderMode.SOFTWARE
         if (!preferSoftware) DecoderBudget.acquire(this)
         softwareDecoding = preferSoftware
         droppedFrames = 0

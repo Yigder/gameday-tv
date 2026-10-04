@@ -14,16 +14,22 @@ A live TV and sports app for Android TV, built around **your IPTV service** and 
   - A **LIVE** button: red while you're watching live; grey when you're behind (paused, rewound, or in catch-up), and pressing it jumps back to live.
   - A **catch-up** button on channels with catch-up: start the current program over, or replay an earlier one from the provider's archive.
   - Back / forward are YouTube TV's circular arrows with the seconds inside (10 and 30). They also work on live streams that have a rewind window.
+  - Fewer buttons: LIVE, back / play / forward, catch-up, game stats and captions. Record, Multiview, favorite, video stats and settings are under **More**, like the movie player.
+  - **Hold OK for Multiview, like TiviMate:** the channel you're watching keeps playing (no reconnect) and the picker opens for a second screen. The Multiview button under More still opens the Multiview builder.
+  - **Hold Back for the guide:** channels with what's on now, and Live now / Coming up game cards, over the video, which keeps playing. Each has one filter (a channel group, or a sport). OK on a channel or live game switches to it; hold OK on a game to add it to Multiview next to what you're watching.
+- **Video decoding is Hardware or Software only.** The Automatic setting (which switched streams to software on its own) is gone, along with the learned decoder limit; Automatic reads as Hardware.
+- **Multiview screens keep playing** when you add a screen, change the layout or come back from full screen, instead of every screen reconnecting. The channel name no longer covers the bottom of each screen (a screen's menu shows it). ▲ shows every screen's score bug, and Back goes back to one screen (the one you're listening to) full screen.
+  - **Score delay slider** in the live player's settings (and Settings › Sports): ◀ ▶ moves it 5 seconds at a time, from off to 3 minutes, so the score bug can match the stream you're watching.
 - **Restart / Previous episode** in the movie and show player: it restarts what's playing, and in the first 15 seconds of an episode it goes to the previous one.
 - **Episode thumbnails** in the player's Episodes list.
 - **Continue watching shows one card per show** (the episode you watched last). Removing it removes the whole show.
 - **Watch the live preview full screen:** on Sports and Live, move up onto the video playing at the top and press OK. Up from the video goes to the tab you're on.
-- **Video stats** in every player: resolution, frame rate, video and audio codecs, decoder, bitrates, connection speed, buffer and dropped frames. It's a button in the live player and under More in the movie and show player, and in each Multiview screen's menu.
+- **Video stats** in every player: resolution, frame rate, video and audio codecs, decoder, bitrates, connection speed, buffer and dropped frames. It's under More in the live, movie and show players, and in each Multiview screen's menu.
 - **Back to the top:** on Sports, Live and On Demand, Back from further down the page goes back to the top first.
 - **Smoother scrolling:** rows glide up as well as down.
 - **Sports header:** with no game highlighted, it shows the channel playing and what's on (from the guide).
 - **Golf:** a tournament is only in "Live now" while a round is being played (not overnight or once the day's play is complete), and golf channels only show its score bug then. Tournament cards show the tour's logo.
-- **On Demand** no longer has the Movies, Shows and Add-ons chips (add-ons are in Settings › Add-ons).
+- **On Demand** no longer has the Movies, Shows, Add-ons or Search chips (search with the icon at the top; add-ons are in Settings › Add-ons). The title at the top can be selected: Up from the first row onto it, then OK opens its page.
 - **Fixes:**
   - Back closes menus, player panels and pages with one press (it used to take two).
   - Up / Down in a long-press menu stays in the menu instead of jumping to the games and shows behind it, and closing a menu returns to the card it was opened from.
@@ -85,7 +91,7 @@ The whole app was rebuilt to look and work like YouTube TV:
 - **Movies and shows** from your provider (Xtream VOD and series). Includes resume, seasons and episodes, and autoplay of the next episode.
 - **Player** works like YouTube TV:
   - Round buttons along the bottom, with a progress bar for the program that's on.
-  - Start over (catch-up), Record and Multiview.
+  - Start over (catch-up), with Record and Multiview under More.
   - Stats: box score, scoring plays and leaders.
   - Captions, audio track, quality, picture size and stream format.
   - A channel or episode strip underneath.
@@ -113,7 +119,8 @@ Upgrading from 1.x? Create your account, and setup offers to reuse the IPTV logi
   - MPEG-TS and HLS, with automatic fallback to the other format.
   - Reconnects automatically when a stream drops.
   - Switches to software decoding when the TV runs out of hardware decoders.
-  - Video decoding can be set to Automatic, Hardware or Software separately for the full-screen player and each Multiview screen (Settings › Playback, the player's settings, or a Multiview screen's menu).
+  - Video decoding can be set to Hardware (the default) or Software separately for the full-screen player and each Multiview screen (Settings › Playback, the player's settings, or a Multiview screen's menu). It never switches on its own; a screen that can't get a hardware decoder says so.
+  - Multiview screens ask adaptive (HLS) streams for 720p and at most 30 fps when the stream offers those versions.
   - Streaming stops when the app goes to the background, which frees your provider's connection.
 
 ## Remote controls
@@ -129,10 +136,21 @@ Upgrading from 1.x? Create your account, and setup offers to reuse the IPTV logi
 | ▼ (controls hidden) | Show the controls |
 | CH+ / CH− | Next / previous channel |
 | Info / Guide / Red / Green | Show or hide the score bug |
-| Hold OK | Multiview with this channel |
+| Hold OK (controls hidden) | Live TV: Multiview, with this channel still playing and a second screen to fill |
+| Hold Back | Live TV: the guide (channels and games) over the video, which keeps playing |
 | Menu | Playback settings |
 | Play/Pause, FF, Rewind | Pause / resume / seek |
-| Back | Hide the controls, then leave the player |
+| Back | Close the guide, hide the controls, then leave the player |
+
+**Guide (hold Back in the player)**
+
+| Button | Action |
+|---|---|
+| OK on a channel or live game | Watch it |
+| Hold OK on a game | Add to Multiview (what you're watching keeps playing beside it) or watch it |
+| OK on Channels / Sports | Switch between the channel list and the games |
+| OK on the filter (top right) | Pick a channel group (favorites, recent, sports channels, your provider's groups) or a sport |
+| Back | Close the filter list, then the guide |
 
 **Multiview**
 
@@ -140,10 +158,10 @@ Upgrading from 1.x? Create your account, and setup offers to reuse the IPTV logi
 |---|---|
 | ◀ ▲ ▼ ▶ | Move between screens. **The audio follows the highlighted screen** |
 | OK | Screen menu: change channel, watch full screen, remove, add a screen, layout |
-| Info | Show the score bugs on all screens |
-| Back | Close the menu / leave Multiview |
+| ▲ / Info | Show the score bugs on all screens that have a game (▲ still moves up when there's a screen above) |
+| Back | Close the menu; otherwise back to one screen, full screen, with the channel you were listening to |
 
-Each Multiview screen is a separate stream, so 4 screens need 4 connections from your provider. The builder only lets you pick as many as your plan allows.
+Each Multiview screen is a separate stream, so 4 screens need 4 connections from your provider (a channel carried on from full screen keeps its one connection). The builder only lets you pick as many as your plan allows.
 
 ## Recordings
 

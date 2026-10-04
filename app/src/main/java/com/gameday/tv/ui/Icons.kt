@@ -78,5 +78,6 @@ object Icons {
     val AspectRatio by lazy { icon("aspect", "M19 12h-2v3h-3v2h5v-5zM7 9h3V7H5v5h2V9zm14-6H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16.01H3V4.99h18v14.02z") }
     val Episodes by lazy { icon("episodes", "M19 9H2v2h17V9zm0-4H2v2h17V5zM2 15h13v-2H2v2zm15-2v6l5-3-5-3z") }
     val ChevronLeft by lazy { icon("chevron_left", "M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z") }
+    val Filter by lazy { icon("filter", "M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z") }
     val Live by lazy { icon("live_dot", "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM4.93 4.93l1.41 1.41C4.9 7.79 4 9.79 4 12s.9 4.21 2.34 5.66l-1.41 1.41C3.12 17.26 2 14.76 2 12s1.12-5.26 2.93-7.07zm14.14 0C20.88 6.74 22 9.24 22 12s-1.12 5.26-2.93 7.07l-1.41-1.41C19.1 16.21 20 14.21 20 12s-.9-4.21-2.34-5.66l1.41-1.41z") }
 }

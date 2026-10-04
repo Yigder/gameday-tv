@@ -351,16 +351,9 @@ private fun LazyListScope.sportsSection(vm: AppViewModel) {
         SettingRow("Score alerts", { vm.updateScoreAlerts(!vm.scoreAlerts) }, subtitle = "Pop up the score when it changes, and when your teams score", checked = vm.scoreAlerts)
     }
     item(key = "delay") {
-        val steps = listOf(0, 30, 60, 90, 120)
-        val next = steps[(steps.indexOf(vm.scoreDelaySec).coerceAtLeast(0) + 1) % steps.size]
-        SettingRow("Score delay", { vm.updateScoreDelay(next) },
+        SliderRow("Score delay", vm.scoreDelaySec, SCORE_DELAY_RANGE, SCORE_DELAY_STEP, vm::updateScoreDelay,
             subtitle = "IPTV runs behind the live broadcast. The score bug and alerts wait this long so they don't spoil plays.",
-            value = when (vm.scoreDelaySec) {
-                0 -> "Off"
-                60 -> "1 min"
-                120 -> "2 min"
-                else -> "${vm.scoreDelaySec} s"
-            })
+            label = ::delayLabel)
     }
     header("Your teams", "Teams you add get a \"Your teams\" filter in Sports, alerts, and optional automatic recording.")
     items(vm.favorites.toList(), key = { "t:" + it.key }) { t ->
@@ -416,7 +409,7 @@ private fun LazyListScope.playbackSection(vm: AppViewModel) {
     item(key = "dec-player") {
         val mode = vm.decoderMode(DecoderSlot.PLAYER)
         SettingRow("Full-screen player", { vm.setDecoderMode(DecoderSlot.PLAYER, mode.next()) },
-            subtitle = "Automatic uses hardware when it's free. Software runs on the CPU and suits smaller or lower-resolution streams.",
+            subtitle = "Hardware is smoothest. Software runs on the CPU and suits smaller or lower-resolution streams. Nothing switches on its own.",
             value = mode.label)
     }
     for (slot in 0 until 4) {
@@ -424,14 +417,9 @@ private fun LazyListScope.playbackSection(vm: AppViewModel) {
             val key = DecoderSlot.multiview(slot)
             val mode = vm.decoderMode(key)
             SettingRow("Multiview screen ${slot + 1}", { vm.setDecoderMode(key, mode.next()) },
-                subtitle = if (slot == 0) "Give the big screen hardware and the small ones software when this TV can't run them all in hardware" else null,
+                subtitle = if (slot == 0) "If a screen says the TV has no hardware decoder free, set the small screens to Software" else null,
                 value = mode.label)
         }
-    }
-    item(key = "decoder") {
-        SettingRow("Reset video decoder limit", { vm.resetDecoderLimit() },
-            subtitle = if (DecoderBudget.limit > 0) "This TV handles ${DecoderBudget.limit} hardware videos at once; extra Automatic streams use software"
-            else "Learned automatically when Multiview runs out of hardware decoders. Applies to Automatic streams.")
     }
     header("Menus")
     item(key = "bg") {
