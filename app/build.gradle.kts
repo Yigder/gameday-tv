@@ -21,8 +21,8 @@ android {
         applicationId = "com.gameday.tv"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "2.5.0"
+        versionCode = 9
+        versionName = "2.5.1"
     }
 
     signingConfigs {
