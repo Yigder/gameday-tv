@@ -9,7 +9,16 @@ data class ChannelMatch(
     val reasons: List<String>,
     /** Channel is specific to this event (both teams, or the tournament name, appear in it). */
     val exact: Boolean,
-)
+    /** Resolution and frame rate: measured when the channel has been played, else from its name. */
+    val quality: StreamQuality = StreamQuality.UNKNOWN,
+) {
+    /** 0 = this event's own channel, 1 = a strong match (its broadcaster, a team's full name), 2 = the rest. */
+    val tier: Int get() = when {
+        exact -> 0
+        score >= 9 -> 1
+        else -> 2
+    }
+}
 
 /**
  * Finds the IPTV channels most likely to be showing a game.
@@ -165,11 +174,23 @@ object ChannelMatcher {
 
     // ---- public API ----
 
-    fun match(game: Game, catalog: IptvCatalog, limit: Int = 80): List<ChannelMatch> =
-        matchEvent(listOf(teamSide(game.away), teamSide(game.home)), game.broadcasts, game.league, catalog, limit)
+    /** Picture quality of a channel when nothing better is known: tags in its name. */
+    val qualityFromName: (Channel) -> StreamQuality = { StreamQuality.fromName(it.name) }
 
-    fun match(tournament: Tournament, catalog: IptvCatalog, limit: Int = 80): List<ChannelMatch> =
-        matchEvent(listOf(tournamentSide(tournament)), tournament.broadcasts, tournament.tour, catalog, limit)
+    fun match(game: Game, catalog: IptvCatalog, limit: Int = 80, quality: (Channel) -> StreamQuality = qualityFromName): List<ChannelMatch> =
+        matchEvent(listOf(teamSide(game.away), teamSide(game.home)), game.broadcasts, game.league, catalog, limit, quality)
+
+    fun match(tournament: Tournament, catalog: IptvCatalog, limit: Int = 80, quality: (Channel) -> StreamQuality = qualityFromName): List<ChannelMatch> =
+        matchEvent(listOf(tournamentSide(tournament)), tournament.broadcasts, tournament.tour, catalog, limit, quality)
+
+    /**
+     * Most relevant first ([ChannelMatch.tier]); within a tier, the highest frame rate and best
+     * resolution first, then the match score.
+     */
+    val BEST_STREAM_FIRST: Comparator<ChannelMatch> = compareBy<ChannelMatch> { it.tier }
+        .thenComparator { a, b -> StreamQuality.BEST_FIRST.compare(a.quality, b.quality) }
+        .thenByDescending { it.score }
+        .thenBy { it.channel.name.length }
 
     private fun matchEvent(
         sides: List<Side>,
@@ -177,6 +198,7 @@ object ChannelMatcher {
         league: League,
         catalog: IptvCatalog,
         limit: Int,
+        quality: (Channel) -> StreamQuality,
     ): List<ChannelMatch> {
         // Broadcasters listed for the event score higher than a league's usual networks,
         // and the first usual network (the main carrier) edges out the others.
@@ -239,10 +261,10 @@ object ChannelMatcher {
             if (ch.group in sports) score += 1
 
             if ((anySide || netScore > 0 || leagueScore > 0) && score >= 3) {
-                out += ChannelMatch(ch, score, reasons, exact)
+                out += ChannelMatch(ch, score, reasons, exact, quality(ch))
             }
         }
-        out.sortWith(compareByDescending<ChannelMatch> { it.score }.thenBy { it.channel.name.length })
+        out.sortWith(BEST_STREAM_FIRST)
         return if (out.size > limit) out.subList(0, limit).toList() else out
     }
 
@@ -266,6 +288,12 @@ object ChannelMatcher {
         val a = bestTeamHit(n, teamPhrases(game.away), "", false)
         val h = bestTeamHit(n, teamPhrases(game.home), "", false)
         return (a?.weight ?: 0) + (h?.weight ?: 0) + if (a != null && h != null) 15 else 0
+    }
+
+    /** NFL RedZone (or a provider's "Red Zone" feed), which jumps between every Sunday game. */
+    fun isRedZone(channelName: String): Boolean {
+        val n = norm(channelName)
+        return containsWord(n, "REDZONE") || containsWord(n, "RED ZONE")
     }
 
     /** Best guess of which live game a channel is currently showing, or null. */

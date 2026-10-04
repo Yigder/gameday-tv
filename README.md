@@ -4,6 +4,12 @@ A live TV and sports app for Android TV, built around **your IPTV service** and 
 
 **Install on Fire TV / Android TV:** open the [Downloader](https://www.aftvnews.com/downloader/) app and enter code **`3558070`**. It always fetches the [latest release](https://github.com/Yigder/gameday-tv/releases/latest).
 
+## What's new in 2.5
+
+- **NFL RedZone score bugs.** On a RedZone channel, every live NFL game gets a mini score bug in a thin strip across the top (up to 8 a row, so the picture stays clear). ▲ shows or hides them, like a single game's bug. A game's bug lights up when its score changes. Works in Multiview too.
+- **Best streams first.** A game's channels are sorted by frame rate, then resolution, within how well they match the game. Quality comes from tags in the channel name ("FHD 60FPS", "720p60", "4K") and, after you've watched a channel, from what it actually played at. "Watch" starts the best one, and the quality (e.g. "1080p · 60 fps") shows on each channel.
+- **Real frame rate in Video stats.** Frame rate is now counted from the frames actually shown, so it appears on IPTV channels that don't report one (most of them).
+
 ## What's new in 2.4
 
 - **Just sports and live TV.** The On Demand tab is gone, along with everything that went with it: add-ons, TorBox, trailers, add-on subtitles, your provider's movies and shows, and saved movies and shows in the Library. Search covers games, teams, channels and what's on TV. Add-on links and the TorBox key saved on the TV are deleted.
@@ -105,7 +111,8 @@ Upgrading from 1.x? Create your account, and setup offers to reuse the IPTV logi
   - its national broadcaster (ESPN, FOX, Prime Video, TNT, NFL Network…)
   - league packages (Sunday Ticket, League Pass, Center Ice…)
 - **Score bug (ScoreBox style)** shows when a stream starts, hides after a few seconds, and comes back with OK or Info. It pops up when the score changes. It recognizes the game even when you tune to a channel by hand.
-- **Hide scores** keeps cards, pages, alerts and the score bug spoiler-free.
+- **NFL RedZone** gets a mini score bug for every live NFL game, in a thin strip across the top (up to 8 a row). ▲ shows or hides them like a single game's bug, and a game's bug lights up when its score changes. Works in Multiview too.
+- **Best streams first.** A game's channels are sorted by frame rate, then resolution (from tags like "FHD 60FPS", or what the channel actually played at earlier), within how well they match the game. The quality shows on each channel.- **Hide scores** keeps cards, pages, alerts and the score bug spoiler-free.
 - **Team pages** show the record, standing, schedule, results, team channels, Add to library and Record all games.
 - **IPTV login** supports two kinds:
   - **Xtream Codes.** You get channels, the guide and catch-up. Pasted `get.php` links are converted automatically.
@@ -191,6 +198,7 @@ gradlew.bat testDebugUnitTest
 
 They cover:
 - channel and golf matching
+- stream quality tags (resolution, frame rate), best-stream sorting and RedZone detection
 - M3U parsing
 - the Xtream guide
 - XMLTV times

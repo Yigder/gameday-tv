@@ -7,18 +7,24 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
@@ -113,6 +120,98 @@ fun EventBug(game: Game?, tournament: Tournament?, state: BugState, modifier: Mo
             tournament != null -> GolfBug(tournament, flash = state.flash, compact = compact)
         }
     }
+}
+
+/**
+ * RedZone: a mini bug for every live NFL game in a strip across the top, shown and hidden with
+ * [state] like a single game's bug. Bugs shrink to fit (up to 8 a row, then more rows) so the
+ * strip stays a thin band over the picture.
+ */
+@Composable
+fun RedZoneBugs(games: List<Game>, state: BugState, modifier: Modifier = Modifier) {
+    if (games.isEmpty()) return
+    AnimatedVisibility(
+        visible = state.visible,
+        enter = fadeIn() + slideInVertically { -it / 2 },
+        exit = fadeOut() + slideOutVertically { -it / 2 },
+        modifier = modifier,
+    ) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val gap = 6.dp
+            // As many as fit at their smallest readable width (fewer in a Multiview screen), then even rows.
+            val fit = ((maxWidth + gap) / (MIN_BUG_WIDTH + gap)).toInt().coerceIn(1, MAX_PER_ROW)
+            val rows = (games.size + fit - 1) / fit
+            val perRow = (games.size + rows - 1) / rows
+            val width = ((maxWidth - gap * (perRow - 1)) / perRow).coerceAtMost(150.dp)
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = Alignment.End) {
+                games.chunked(perRow).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        row.forEach { g -> key(g.id) { MiniScoreBug(g, width) } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val MAX_PER_ROW = 8
+private val MIN_BUG_WIDTH = 88.dp
+
+/** One RedZone game: both teams stacked with scores, possession, and the clock. Lights up when its score changes. */
+@Composable
+private fun MiniScoreBug(game: Game, width: Dp) {
+    val flash = rememberScoreFlash(scoreKeyOf(game, null))
+    val shape = RoundedCornerShape(6.dp)
+    Column(
+        Modifier
+            .width(width)
+            .background(BugBackground, shape)
+            .border(if (flash) 2.dp else 1.dp, if (flash) AppColors.Accent else AppColors.Border, shape)
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+    ) {
+        MiniTeam(game.away, game)
+        MiniTeam(game.home, game)
+        Text(
+            if (flash) "SCORE" else game.shortDetail,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (flash) AppColors.Accent else AppColors.TextDim,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun MiniTeam(team: TeamScore, game: Game) {
+    val other = if (team.id == game.away.id) game.home else game.away
+    val trailing = (team.score.toIntOrNull() ?: 0) < (other.score.toIntOrNull() ?: 0)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TeamLogo(team.logo, team.abbreviation, 14.dp)
+        Spacer(Modifier.width(4.dp))
+        Text(team.abbreviation, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, color = if (trailing) AppColors.TextDim else AppColors.Text)
+        if (game.possessionTeamId == team.id) {
+            Spacer(Modifier.width(3.dp))
+            Box(Modifier.size(5.dp).background(AppColors.Accent, CircleShape))
+        }
+        Spacer(Modifier.weight(1f))
+        Text(team.score, fontSize = 12.sp, fontWeight = FontWeight.Black, color = if (trailing) AppColors.TextDim else AppColors.Text)
+    }
+}
+
+/** True for a few seconds after [scoreKey] changes. */
+@Composable
+private fun rememberScoreFlash(scoreKey: String?): Boolean {
+    var flash by remember { mutableStateOf(false) }
+    var last by remember { mutableStateOf(scoreKey) }
+    LaunchedEffect(scoreKey) {
+        if (scoreKey == null || last == null || scoreKey == last) { last = scoreKey; return@LaunchedEffect }
+        last = scoreKey
+        flash = true
+        delay(6_000)
+        flash = false
+    }
+    return flash
 }
 
 fun scoreKeyOf(game: Game?, tournament: Tournament?): String? = when {

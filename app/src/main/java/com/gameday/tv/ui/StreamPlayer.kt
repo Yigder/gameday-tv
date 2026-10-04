@@ -43,6 +43,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.gameday.tv.data.Http
+import com.gameday.tv.data.StreamQuality
 import kotlinx.coroutines.delay
 
 /**
@@ -106,6 +107,36 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
 
     /** The address playing now (which of the candidates worked). */
     val currentUrl: String? get() = candidates.getOrNull(attempt)
+
+    private var fpsFrames = -1
+    private var fpsAt = 0L
+    private var measuredFps = 0f
+
+    /**
+     * Frames per second being shown. Counted from the frames actually rendered, since IPTV TS
+     * streams rarely declare a rate; the declared rate until there's a count. 0 = not known yet.
+     * Callers poll it about once a second; closer calls return the last reading.
+     */
+    fun frameRate(): Float {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - fpsAt >= 900) {
+            val frames = player.videoDecoderCounters?.also { it.ensureUpdated() }?.renderedOutputBufferCount ?: -1
+            if (frames >= 0 && fpsFrames in 0..frames && player.isPlaying && fpsAt > 0) {
+                val sample = (frames - fpsFrames) * 1000f / (now - fpsAt)
+                // Smooth out jitter; take the first real reading as is.
+                if (sample > 0f) measuredFps = if (measuredFps <= 0f) sample else measuredFps * 0.6f + sample * 0.4f
+            }
+            fpsFrames = frames
+            fpsAt = now
+        }
+        return if (measuredFps > 0f) measuredFps else player.videoFormat?.frameRate?.takeIf { it > 0f } ?: 0f
+    }
+
+    /** Resolution and frame rate of what's showing, for sorting a game's streams. */
+    fun quality(): StreamQuality {
+        val h = player.videoSize.height.takeIf { it > 0 } ?: player.videoFormat?.height?.takeIf { it > 0 } ?: 0
+        return StreamQuality(h, frameRate())
+    }
 
     init {
         player.addAnalyticsListener(object : AnalyticsListener {
@@ -332,6 +363,9 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         if (!preferSoftware) DecoderBudget.acquire(this)
         softwareDecoding = preferSoftware
         droppedFrames = 0
+        fpsFrames = -1
+        fpsAt = 0L
+        measuredFps = 0f
         videoDecoder = null
         audioDecoder = null
         buffering = true

@@ -169,7 +169,11 @@ private fun MatchCard(vm: AppViewModel, m: ChannelMatch, channels: List<Channel>
     val program = vm.nowPlaying(m.channel.id)
     MediaCard(
         title = cleanChannelName(m.channel.name),
-        subtitle = (if (m.exact) "Best match · " else "") + (program?.title ?: m.reasons.joinToString(" · ").ifBlank { m.channel.group }),
+        subtitle = listOfNotNull(
+            "Best match".takeIf { m.exact },
+            m.quality.label.ifEmpty { null },
+            program?.title ?: m.reasons.joinToString(" · ").ifBlank { m.channel.group },
+        ).joinToString(" · "),
         onClick = { vm.play(channels, channels.indexOf(m.channel).coerceAtLeast(0), eventId) },
         onLongClick = { channelMenu(vm, m.channel, channels) },
         modifier = Modifier.rememberFocus(vm, screenKey, m.channel.id),

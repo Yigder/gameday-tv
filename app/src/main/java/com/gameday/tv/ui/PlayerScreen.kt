@@ -171,19 +171,24 @@ fun PlayerScreen(vm: AppViewModel) {
 
     // ---- sports context: the event we came from, or one this channel looks like it's showing ----
     val liveChannel = (req as? PlayRequest.Live)?.current
+    // RedZone jumps between every NFL game, so it gets a bug for each live one instead of one game's.
+    val redZone = vm.isRedZone(liveChannel)
     val liveGame = remember(req, vm.games) {
-        (req as? PlayRequest.Live)?.eventId?.let { vm.gameById(it) } ?: liveChannel?.let { vm.liveGameFor(it) }
+        if (redZone) null
+        else (req as? PlayRequest.Live)?.eventId?.let { vm.gameById(it) } ?: liveChannel?.let { vm.liveGameFor(it) }
     }
     val liveTournament = remember(req, vm.tournaments) {
-        if (liveGame != null) null
+        if (liveGame != null || redZone) null
         else (req as? PlayRequest.Live)?.eventId?.let { vm.tournamentById(it) } ?: liveChannel?.let { vm.liveTournamentFor(it) }
     }
     // The score bug follows the stream, which runs behind the live scoreboard.
     val linkedGame = vm.delayedGame(liveGame)
     val linkedTournament = vm.delayedTournament(liveTournament)
+    val redZoneGames = if (redZone) vm.liveNflGames.mapNotNull { vm.delayedGame(it) } else emptyList()
     val bug = rememberBugState(
         key = now.key,
-        scoreKey = scoreKeyOf(linkedGame, linkedTournament),
+        scoreKey = if (redZone) redZoneGames.joinToString("|") { "${it.id}:${scoreKeyOf(it, null)}" }.ifEmpty { null }
+            else scoreKeyOf(linkedGame, linkedTournament),
         mode = vm.scoreBugMode,
         popOnScore = vm.scoreAlerts && !vm.hideScores,
         startVisible = !vm.hideScores,
@@ -290,7 +295,8 @@ fun PlayerScreen(vm: AppViewModel) {
                     // Up only shows or hides the score bug (nothing else), like ScoreBox.
                     Key.DirectionUp -> {
                         when {
-                            linkedGame != null || linkedTournament != null -> bug.toggle()
+                            linkedGame != null || linkedTournament != null || redZoneGames.isNotEmpty() -> bug.toggle()
+                            redZone -> vm.showMessage("No NFL games are live right now")
                             live -> vm.showMessage("No live score for this channel")
                             else -> showControls()
                         }
@@ -350,6 +356,10 @@ fun PlayerScreen(vm: AppViewModel) {
         // With the controls up, the bug moves below the channel name and clock.
         val bugTop by animateDpAsState(if (controls && panel == Panel.None) 92.dp else 24.dp, tween(260, easing = FastOutSlowInEasing), label = "bugTop")
         EventBug(linkedGame, linkedTournament, bug, Modifier.align(Alignment.TopEnd).padding(top = bugTop, end = 32.dp))
+        RedZoneBugs(redZoneGames, bug, Modifier.align(Alignment.TopEnd).padding(top = bugTop, start = 32.dp, end = 32.dp))
+
+        // Remember the picture each channel really plays at, so its streams sort by it next time.
+        if (req is PlayRequest.Live && channel != null) NoteStreamQuality(vm, channel, stream)
 
         // Video stats: top left, below the channel name while the controls are up.
         if (videoStats) {
@@ -861,6 +871,20 @@ private fun MiniCard(title: String, subtitle: String, selected: Boolean, onFocus
 // ---------------------------------------------------------------------------------------------
 // Side panels
 // ---------------------------------------------------------------------------------------------
+
+/** Records the resolution and frame rate [channel] actually plays at, once they've held for a few seconds. */
+@Composable
+private fun NoteStreamQuality(vm: AppViewModel, channel: Channel, stream: StreamController) {
+    LaunchedEffect(channel.id, stream.loadToken) {
+        // Give the frame count a few seconds to settle, then keep it current while the channel plays.
+        delay(5_000)
+        while (true) {
+            val q = stream.quality()
+            if (q.height > 0 && q.fps > 0f && stream.currentKey == channel.id) vm.noteStreamQuality(channel, q)
+            delay(10_000)
+        }
+    }
+}
 
 @Composable
 private fun StatsPanel(vm: AppViewModel, game: com.gameday.tv.data.Game) {

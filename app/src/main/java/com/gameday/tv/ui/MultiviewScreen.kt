@@ -481,12 +481,16 @@ private fun ActiveTile(
         vm.noteRecent(channel)
     }
 
-    val liveGame = remember(channel.id, vm.games) { vm.liveGameFor(channel) }
-    val liveTournament = remember(channel.id, vm.tournaments) { if (liveGame == null) vm.liveTournamentFor(channel) else null }
+    // RedZone gets a mini bug for every live NFL game instead of one game's bug.
+    val redZone = vm.isRedZone(channel)
+    val liveGame = remember(channel.id, vm.games) { if (redZone) null else vm.liveGameFor(channel) }
+    val liveTournament = remember(channel.id, vm.tournaments) { if (liveGame == null && !redZone) vm.liveTournamentFor(channel) else null }
     // The stream runs behind the scoreboard: show the score from that long ago.
     val game = vm.delayedGame(liveGame)
     val tournament = vm.delayedTournament(liveTournament)
-    val bug = rememberBugState(channel.id, scoreKeyOf(game, tournament), vm.scoreBugMode, vm.scoreAlerts, showMillis = 6_000)
+    val redZoneGames = if (redZone) vm.liveNflGames.mapNotNull { vm.delayedGame(it) } else emptyList()
+    val scoreKey = if (redZone) redZoneGames.joinToString("|") { "${it.id}:${scoreKeyOf(it, null)}" }.ifEmpty { null } else scoreKeyOf(game, tournament)
+    val bug = rememberBugState(channel.id, scoreKey, vm.scoreBugMode, vm.scoreAlerts, showMillis = 6_000)
     LaunchedEffect(bugSignal) { if (bugSignal > 0) bug.show() }
 
     Box(Modifier.fillMaxSize()) {
@@ -510,6 +514,7 @@ private fun ActiveTile(
         }
 
         EventBug(game, tournament, bug, Modifier.align(Alignment.TopEnd).padding(8.dp), compact = !single)
+        RedZoneBugs(redZoneGames, bug, Modifier.align(Alignment.TopEnd).padding(8.dp))
         if (videoStats) VideoStatsOverlay(stream, Modifier.align(Alignment.TopStart).padding(8.dp), compact = !single)
         // No channel name over the picture: the highlighted screen is the one you hear, and its
         // menu (OK) names the channel.
@@ -834,7 +839,7 @@ private fun EventsPage(vm: AppViewModel, league: SportPick?, onScreens: Set<Stri
             items(picks, key = { "m:${e.eventId}:${it.channel.id}" }) { m ->
                 ChannelRow(
                     channel = m.channel,
-                    subtitle = m.reasons.joinToString("  •  ").ifBlank { m.channel.group },
+                    subtitle = (listOfNotNull(m.quality.label.ifEmpty { null }) + m.reasons).joinToString("  •  ").ifBlank { m.channel.group },
                     badge = if (m.exact) "Best" else null,
                     onClick = { onPick(m.channel) },
                     modifier = if (m.channel == firstChannel) Modifier.focusRequester(firstFocus) else Modifier,

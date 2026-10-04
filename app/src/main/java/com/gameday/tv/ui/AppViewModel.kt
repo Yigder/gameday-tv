@@ -46,6 +46,7 @@ import com.gameday.tv.data.ResumePoint
 import com.gameday.tv.data.ScoreBugMode
 import com.gameday.tv.data.ScoresRepository
 import com.gameday.tv.data.StreamFormat
+import com.gameday.tv.data.StreamQuality
 import com.gameday.tv.data.TeamInfo
 import com.gameday.tv.data.Tournament
 import com.gameday.tv.data.Xmltv
@@ -1057,15 +1058,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- stream quality: what a channel actually played at, else what its name says ----
+
+    /** Resolution and frame rate seen while playing each channel (this session). */
+    private val measuredQuality = java.util.concurrent.ConcurrentHashMap<String, StreamQuality>()
+
+    fun streamQuality(channel: Channel): StreamQuality = measuredQuality[channel.id] ?: StreamQuality.fromName(channel.name)
+
+    /** Called by the full-screen player once a channel's picture is known, so it sorts by it next time. */
+    fun noteStreamQuality(channel: Channel, quality: StreamQuality) {
+        if (quality.known) measuredQuality[channel.id] = quality.copy(measured = true)
+    }
+
     suspend fun matchChannels(game: Game): List<ChannelMatch> {
         val cat = catalog ?: return emptyList()
-        return withContext(Dispatchers.Default) { ChannelMatcher.match(game, cat) }
+        return withContext(Dispatchers.Default) { ChannelMatcher.match(game, cat, quality = ::streamQuality) }
     }
 
     suspend fun matchChannels(t: Tournament): List<ChannelMatch> {
         val cat = catalog ?: return emptyList()
-        return withContext(Dispatchers.Default) { ChannelMatcher.match(t, cat) }
+        return withContext(Dispatchers.Default) { ChannelMatcher.match(t, cat, quality = ::streamQuality) }
     }
+
+    /** True for NFL RedZone, which gets a score bug for every live NFL game. */
+    fun isRedZone(channel: Channel?): Boolean = channel != null && ChannelMatcher.isRedZone(channel.name)
+
+    /** Live NFL games, earliest kickoff first (RedZone's score bugs). */
+    val liveNflGames: List<Game>
+        get() = games.filter { it.league.key == "nfl" && it.state == GameState.LIVE }.sortedBy { it.startMillis }
 
     suspend fun searchChannels(query: String, groups: Set<String>? = null): List<Channel> {
         val cat = catalog ?: return emptyList()
@@ -1632,7 +1652,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return withContext(Dispatchers.Default) {
             if (golf) {
                 tournaments.filter { (leagueKey == Leagues.GOLF || it.tour.key == leagueKey) && it.state != GameState.FINAL }.map { t ->
-                    EventStreams(t.id, t.name, t.detail, t.roundInProgress, ChannelMatcher.match(t, cat, perEvent))
+                    EventStreams(t.id, t.name, t.detail, t.roundInProgress, ChannelMatcher.match(t, cat, perEvent, ::streamQuality))
                 }
             } else {
                 val pool = if (leagueKey == null) favoriteGames else games.filter { it.league.key == leagueKey }
@@ -1642,7 +1662,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     .map { g ->
                         val score = if (g.state == GameState.PRE || hideScores) "" else " · ${g.away.score}-${g.home.score}"
                         EventStreams(g.id, "${g.away.shortName} at ${g.home.shortName}", "${g.league.label} · ${statusText(g)}$score",
-                            g.state == GameState.LIVE, ChannelMatcher.match(g, cat, perEvent))
+                            g.state == GameState.LIVE, ChannelMatcher.match(g, cat, perEvent, ::streamQuality))
                     }
             }
         }

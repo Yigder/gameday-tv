@@ -75,7 +75,8 @@ private fun videoStats(s: StreamController, compact: Boolean): List<Pair<String,
     val w = if (size.width > 0) size.width else video?.width ?: 0
     val h = if (size.height > 0) size.height else video?.height ?: 0
     if (w > 0 && h > 0) out += "Resolution" to listOfNotNull("$w×$h", MediaInfo.quality(w, h)).joinToString(" · ")
-    MediaInfo.frameRate(video?.frameRate ?: Format.NO_VALUE.toFloat())?.let { out += "Frame rate" to it }
+    // Measured from the frames shown: most IPTV streams don't declare a frame rate.
+    out += "Frame rate" to (MediaInfo.frameRate(s.frameRate()) ?: "Measuring…")
     if (video != null) {
         val hdr = when (video.colorInfo?.colorTransfer) {
             C.COLOR_TRANSFER_ST2084 -> "HDR10"
