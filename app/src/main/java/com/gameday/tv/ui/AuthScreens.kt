@@ -87,7 +87,7 @@ fun WelcomeScreen(vm: AppViewModel) {
 
     AuthLayout(
         title = "Live sports and TV,\nthe way you like it",
-        subtitle = "Live scores for every game, your IPTV channels, a full program guide, recordings, Multiview and movies — together in one place. " +
+        subtitle = "Live scores for every game, your IPTV channels, a full program guide, recordings and Multiview — together in one place. " +
             "Create a free GameDay TV account to save your teams, library and profiles.",
     ) {
         if (accounts.isNotEmpty()) {

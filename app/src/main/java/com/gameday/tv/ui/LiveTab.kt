@@ -114,6 +114,8 @@ fun LiveTab(vm: AppViewModel) {
     val selectedChip = remember { FocusRequester() }
     val tracker = remember { FocusTracker() }
     if (vm.tabWantsFocus) InitialFocus(vm, screenKey, gridFocus, tracker = tracker)
+    // Back from far down the guide: to the first channel.
+    BackToTop(listState, gridFocus)
 
     /** Moves the time window so [target] (the next or previous program) is on screen, and focuses it. */
     fun shift(right: Boolean, channelId: String, target: Long) {

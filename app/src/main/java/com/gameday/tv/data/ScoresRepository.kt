@@ -173,11 +173,13 @@ class ScoresRepository {
 
     suspend fun fetchGolf(tour: League): List<Tournament> {
         val url = "https://site.api.espn.com/apis/site/v2/sports/golf/${tour.path}/scoreboard"
-        val events = JSONObject(Http.getString(url)).optJSONArray("events") ?: return emptyList()
-        return events.objects().mapNotNull { runCatching { parseTournament(tour, it) }.getOrNull() }.toList()
+        val root = JSONObject(Http.getString(url))
+        val events = root.optJSONArray("events") ?: return emptyList()
+        val logo = leagueLogo(root)
+        return events.objects().mapNotNull { runCatching { parseTournament(tour, it, logo) }.getOrNull() }.toList()
     }
 
-    private fun parseTournament(tour: League, ev: JSONObject): Tournament? {
+    private fun parseTournament(tour: League, ev: JSONObject, logo: String?): Tournament? {
         val comp = ev.optJSONArray("competitions")?.optJSONObject(0) ?: return null
         // The event status tracks the tournament week; the competition status tracks the current round.
         val eventType = ev.optJSONObject("status")?.optJSONObject("type") ?: JSONObject()
@@ -228,11 +230,12 @@ class ScoresRepository {
             startMillis = parseDate(ev.optString("date")),
             endMillis = parseDate(ev.optString("endDate")),
             state = state,
-            roundInProgress = roundType.optString("state") == "in",
+            roundInProgress = roundIsBeingPlayed(roundType.optString("state"), roundType.optString("name")),
             detail = roundType.optString("shortDetail").clean() ?: roundType.optString("description"),
             broadcasts = broadcasts.toList(),
             leaders = leaders,
             fieldSize = competitors.size,
+            logo = logo,
         )
     }
 
@@ -357,3 +360,21 @@ class ScoresRepository {
 
 internal fun JSONArray.objects(): Sequence<JSONObject> =
     (0 until length()).asSequence().mapNotNull { optJSONObject(it) }
+
+/**
+ * Whether golf is being played right now, from the round's status. ESPN marks a finished day
+ * "post" (Play Complete); a suspended or postponed round can still say "in", so its name decides.
+ */
+internal fun roundIsBeingPlayed(state: String, statusName: String): Boolean {
+    if (state != "in") return false
+    val name = statusName.uppercase()
+    return listOf("SUSPENDED", "POSTPONED", "CANCELED", "CANCELLED", "PLAY_COMPLETE").none { it in name }
+}
+
+/** A scoreboard's league logo (`leagues[0].logos`), the one made for dark backgrounds when there is one. */
+internal fun leagueLogo(scoreboard: JSONObject): String? {
+    val logos = scoreboard.optJSONArray("leagues")?.optJSONObject(0)?.optJSONArray("logos")?.objects()?.toList().orEmpty()
+    fun rels(o: JSONObject): List<String> = o.optJSONArray("rel")?.let { r -> (0 until r.length()).map { r.optString(it) } }.orEmpty()
+    val pick = logos.firstOrNull { "dark" in rels(it) } ?: logos.firstOrNull()
+    return pick?.optString("href")?.takeIf { it.isNotBlank() }
+}

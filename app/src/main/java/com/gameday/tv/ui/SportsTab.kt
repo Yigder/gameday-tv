@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
@@ -36,6 +37,7 @@ import com.gameday.tv.data.FavoriteTeam
 import com.gameday.tv.data.Game
 import com.gameday.tv.data.GameState
 import com.gameday.tv.data.Leagues
+import com.gameday.tv.data.Program
 import com.gameday.tv.data.Tournament
 import com.gameday.tv.ui.theme.AppColors
 
@@ -71,6 +73,7 @@ fun SportsTab(vm: AppViewModel) {
 
     val listState = rememberLazyListState()
     val nav = rememberRowNav(listState)
+    BackToTop(listState, chips)
     val picks = vm.followedPicks
     val pick = Leagues.pick(filter)
     val keys = pick?.leagueKeys
@@ -84,8 +87,11 @@ fun SportsTab(vm: AppViewModel) {
         pick?.sport == "golf" -> vm.tournaments.filter { it.tour.key in keys.orEmpty() }
         else -> emptyList()
     }
-    val live = pool.filter { it.state == GameState.LIVE }.map { SportsItem.G(it) } + tours.filter { it.roundInProgress || it.state == GameState.LIVE }.map { SportsItem.T(it) }
-    val upcoming = (pool.filter { it.state == GameState.PRE }.map { SportsItem.G(it) } + tours.filter { it.state == GameState.PRE }.map { SportsItem.T(it) })
+    // A tournament is LIVE all week; it's only "Live now" while a round is being played. Between
+    // rounds (overnight, play complete, suspended) it waits in Upcoming for the next round.
+    val live = pool.filter { it.state == GameState.LIVE }.map { SportsItem.G(it) } + tours.filter { it.roundInProgress }.map { SportsItem.T(it) }
+    val upcoming = (pool.filter { it.state == GameState.PRE }.map { SportsItem.G(it) } +
+        tours.filter { it.state == GameState.PRE || (it.state == GameState.LIVE && !it.roundInProgress) }.map { SportsItem.T(it) })
         .sortedBy { it.start }
     val finals = (pool.filter { it.state == GameState.FINAL }.map { SportsItem.G(it) } + tours.filter { it.state == GameState.FINAL }.map { SportsItem.T(it) })
         .sortedByDescending { it.start }
@@ -106,11 +112,16 @@ fun SportsTab(vm: AppViewModel) {
     val presets = vm.multiviewRow
     LaunchedEffect(vm.games, vm.catalog, vm.favoriteChannelIds.size) { vm.multiviewRow = if (hasProvider) vm.multiviewPresets() else emptyList() }
 
+    // With no card focused, the header describes the live channel playing beside it (when one is);
+    // otherwise the first game.
+    val playing = vm.backgroundChannel?.takeIf { vm.backgroundShowing }
+    if (playing != null) LaunchedEffect(playing.id) { vm.requestEpg(playing) }
     val first = live.firstOrNull() ?: upcoming.firstOrNull()
-    val defaultHero = when (first) {
-        is SportsItem.G -> heroFor(first.game, vm.hideScores)
-        is SportsItem.T -> heroFor(first.t, vm.hideScores)
-        null -> HeroInfo(pick?.label ?: "Sports", listOf("No games right now"))
+    val defaultHero = when {
+        playing != null -> playingHero(playing, vm.nowPlaying(playing.id))
+        first is SportsItem.G -> heroFor(first.game, vm.hideScores)
+        first is SportsItem.T -> heroFor(first.t, vm.hideScores)
+        else -> HeroInfo(pick?.label ?: "Sports", listOf("No games right now"))
     }
 
     fun choose(f: String) {
@@ -122,7 +133,11 @@ fun SportsTab(vm: AppViewModel) {
         TabHero(vm, defaultHero, Modifier.fillMaxWidth().height(250.dp).padding(top = 72.dp), compact = true, videoBehind = vm.backgroundShowing)
         LazyRow(
             // Up from the rows comes back to the chosen sport, not the chip that lines up.
-            Modifier.focusRequester(chips).focusRestorer(selectedChip),
+            Modifier
+                .focusRequester(chips)
+                .focusRestorer(selectedChip)
+                // No card focused here: the header goes back to the channel that's playing.
+                .onFocusChanged { if (it.hasFocus) vm.heroFocus = null },
             contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -182,6 +197,19 @@ fun SportsTab(vm: AppViewModel) {
             }
         }
     }
+}
+
+/** The header for the channel playing behind Sports: its name, and what's on when the guide says. */
+private fun playingHero(channel: Channel, program: Program?, now: Long = System.currentTimeMillis()): HeroInfo {
+    val onNow = program?.takeIf { it.isOnNow(now) }
+    return HeroInfo(
+        title = cleanChannelName(channel.name),
+        meta = listOfNotNull(onNow?.title ?: "Live now", onNow?.let { minutesLeft(it.endMillis, now) }),
+        description = onNow?.description?.takeIf { it.isNotBlank() },
+        live = true,
+        channel = channel,
+        progress = onNow?.progress(now),
+    )
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.sportsItems(

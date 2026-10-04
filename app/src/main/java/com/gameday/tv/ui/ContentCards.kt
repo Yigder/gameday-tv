@@ -27,13 +27,9 @@ import com.gameday.tv.data.Channel
 import com.gameday.tv.data.FavoriteTeam
 import com.gameday.tv.data.Game
 import com.gameday.tv.data.GameState
-import com.gameday.tv.data.Movie
 import com.gameday.tv.data.RecStatus
 import com.gameday.tv.data.Recording
 import com.gameday.tv.data.ResumePoint
-import com.gameday.tv.data.SavedItem
-import com.gameday.tv.data.SavedKind
-import com.gameday.tv.data.Series
 import com.gameday.tv.data.Tournament
 import com.gameday.tv.ui.theme.AppColors
 
@@ -87,61 +83,6 @@ fun ChannelCard(
         onFocus = { onHero(heroFor(channel, program, now)) },
         modifier = Modifier.rememberFocus(vm, screenKey, keyPrefix + channel.id),
     ) { ChannelThumb(channel, program, now) }
-}
-
-@Composable
-fun MovieCard(vm: AppViewModel, movie: Movie, screenKey: String, onHero: (HeroInfo) -> Unit = {}) {
-    MediaCard(
-        title = movie.name,
-        subtitle = movie.rating?.let { "★ %.1f".format(it) },
-        onClick = { vm.openMovie(movie) },
-        onFocus = { onHero(HeroInfo(movie.name, listOfNotNull("Movie", movie.rating?.let { "★ %.1f".format(it) }), image = movie.poster)) },
-        modifier = Modifier.rememberFocus(vm, screenKey, "m:" + movie.id),
-        width = POSTER_WIDTH.dp,
-        aspect = 2f / 3f,
-    ) { PosterThumb(movie.poster, movie.name) }
-}
-
-@Composable
-fun SeriesCard(vm: AppViewModel, s: Series, screenKey: String, onHero: (HeroInfo) -> Unit = {}) {
-    MediaCard(
-        title = s.name,
-        subtitle = listOfNotNull(s.releaseDate?.take(4), s.genre?.substringBefore(',')).joinToString(" · ").ifBlank { null },
-        onClick = { vm.openSeries(s) },
-        onFocus = { onHero(HeroInfo(s.name, listOfNotNull("Show", s.genre?.substringBefore(','), s.releaseDate?.take(4)), s.plot, image = s.backdrop ?: s.poster)) },
-        modifier = Modifier.rememberFocus(vm, screenKey, "s:" + s.id),
-        width = POSTER_WIDTH.dp,
-        aspect = 2f / 3f,
-    ) { PosterThumb(s.poster, s.name) }
-}
-
-@Composable
-fun SavedCard(vm: AppViewModel, item: SavedItem, screenKey: String) {
-    MediaCard(
-        title = item.title,
-        subtitle = when (item.kind) {
-            SavedKind.MOVIE -> "Movie"
-            SavedKind.SERIES -> "Show"
-            SavedKind.ADDON_MOVIE -> "Movie · On Demand"
-            SavedKind.ADDON_SERIES -> "Show · On Demand"
-        },
-        onClick = {
-            when (item.kind) {
-                SavedKind.MOVIE -> vm.navigate(Screen.MovieDetail(item.id))
-                SavedKind.SERIES -> vm.navigate(Screen.SeriesDetail(item.id))
-                SavedKind.ADDON_MOVIE -> vm.navigate(Screen.AddonDetail("movie", item.id))
-                SavedKind.ADDON_SERIES -> vm.navigate(Screen.AddonDetail("series", item.id))
-            }
-        },
-        onLongClick = {
-            vm.showDialog(AppDialog(item.title, actions = listOf(DialogAction("Remove from library", Icons.Delete) {
-                vm.dismissDialog(); vm.toggleSaved(item.kind, item.id, item.title, item.image)
-            })))
-        },
-        modifier = Modifier.rememberFocus(vm, screenKey, item.key),
-        width = POSTER_WIDTH.dp,
-        aspect = 2f / 3f,
-    ) { PosterThumb(item.image, item.title) }
 }
 
 @Composable
@@ -251,24 +192,6 @@ fun PresetCard(vm: AppViewModel, preset: MultiviewPreset, screenKey: String, onH
         }
         Box(Modifier.fillMaxSize().padding(6.dp)) { LiveBadge(Modifier.align(Alignment.BottomStart), small = true) }
     }
-}
-
-/** A movie or show from a streaming add-on. */
-@Composable
-fun AddonCard(vm: AppViewModel, meta: com.gameday.tv.data.MetaPreview, screenKey: String, onHero: (HeroInfo) -> Unit = {}, keyPrefix: String = "") {
-    val kind = if (meta.type == "series") "Show" else if (meta.type == "movie") "Movie" else meta.type.replaceFirstChar { it.uppercase() }
-    MediaCard(
-        title = meta.name,
-        subtitle = listOfNotNull(meta.releaseInfo, meta.imdbRating?.let { "★ $it" }).joinToString(" · ").ifBlank { kind },
-        onClick = { vm.navigate(Screen.AddonDetail(meta.type, meta.id)) },
-        onFocus = {
-            onHero(HeroInfo(meta.name, listOfNotNull(kind, meta.releaseInfo, meta.genres.take(2).joinToString(", ").ifBlank { null }, meta.imdbRating?.let { "★ $it" }),
-                meta.description, image = meta.background ?: meta.poster))
-        },
-        modifier = Modifier.rememberFocus(vm, screenKey, keyPrefix + meta.type + ":" + meta.id),
-        width = POSTER_WIDTH.dp,
-        aspect = 2f / 3f,
-    ) { PosterThumb(meta.poster, meta.name) }
 }
 
 /** "See all" tile at the end of a row. */

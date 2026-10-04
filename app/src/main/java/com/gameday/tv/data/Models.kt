@@ -70,66 +70,6 @@ data class Program(
         if (endMillis <= startMillis) 0f else ((now - startMillis).toFloat() / (endMillis - startMillis)).coerceIn(0f, 1f)
 }
 
-// ---------- Movies & shows ----------
-
-data class VodCategory(val id: String, val name: String)
-
-data class Movie(
-    val id: String,
-    val name: String,
-    val poster: String?,
-    val categoryId: String?,
-    val rating: Double?,
-    /** When the provider added it (epoch seconds), for "Recently added". */
-    val added: Long,
-    val ext: String,
-    /** Direct URL (M3U playlists). */
-    val url: String? = null,
-)
-
-data class MovieInfo(
-    val plot: String?,
-    val cast: String?,
-    val director: String?,
-    val genre: String?,
-    val releaseDate: String?,
-    val durationSecs: Int?,
-    val backdrop: String?,
-    val rating: String?,
-    val ext: String?,
-)
-
-data class Series(
-    val id: String,
-    val name: String,
-    val poster: String?,
-    val categoryId: String?,
-    val plot: String?,
-    val genre: String?,
-    val rating: Double?,
-    val releaseDate: String?,
-    val backdrop: String?,
-    val lastModified: Long,
-)
-
-data class Episode(
-    val id: String,
-    val seriesId: String,
-    val season: Int,
-    val number: Int,
-    val title: String,
-    val plot: String?,
-    val image: String?,
-    val durationSecs: Int?,
-    val ext: String,
-)
-
-data class SeriesInfo(val series: Series, val seasons: List<Int>, val episodes: Map<Int, List<Episode>>) {
-    val allEpisodes: List<Episode> get() = seasons.flatMap { episodes[it].orEmpty() }
-}
-
-class VodLibrary<T>(val categories: List<VodCategory>, val items: List<T>)
-
 // ---------- Scores ----------
 
 enum class GameState { PRE, LIVE, FINAL }
@@ -284,6 +224,8 @@ data class Tournament(
     val broadcasts: List<String>,
     val leaders: List<GolfPlayer>,
     val fieldSize: Int,
+    /** The tour's logo (PGA TOUR, DP World Tour), for the tournament's card. */
+    val logo: String? = null,
 )
 
 // ---------- App accounts ----------
@@ -299,15 +241,7 @@ data class Profile(val id: String, val name: String, val color: Int) {
 
 // ---------- Library ----------
 
-/** MOVIE / SERIES are from the IPTV provider; ADDON_* are from streaming add-ons (id = meta id). */
-enum class SavedKind { MOVIE, SERIES, ADDON_MOVIE, ADDON_SERIES }
-
-data class SavedItem(val kind: SavedKind, val id: String, val title: String, val image: String?, val addedAt: Long) {
-    val key: String get() = "${kind.name}:$id"
-    val isMovie: Boolean get() = kind == SavedKind.MOVIE || kind == SavedKind.ADDON_MOVIE
-}
-
-/** Where the viewer stopped in something they can resume (movie, episode, recording). */
+/** Where the viewer stopped in a recording. */
 data class ResumePoint(
     val key: String,
     val title: String,

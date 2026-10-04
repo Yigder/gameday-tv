@@ -37,6 +37,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -52,10 +53,9 @@ import kotlinx.coroutines.delay
 @Stable
 @OptIn(UnstableApi::class)
 class StreamController(context: Context, handleAudioFocus: Boolean) {
-    /** Decode video on the CPU: set when this device is out of hardware decoders (see [DecoderBudget]). */
+    /** Decode video on the CPU (this stream's position is set to Software). */
     @Volatile
     private var preferSoftware = false
-    private var forcedSoftware = false
 
     private val dataSource = OkHttpDataSource.Factory(Http.client)
 
@@ -64,8 +64,8 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
     /** True while this stream is decoding in software. */
     var softwareDecoding by mutableStateOf(false); private set
 
-    /** Hardware, software, or automatic: chosen per stream in Settings › Playback or the stream's menu. */
-    var decoderMode by mutableStateOf(DecoderMode.AUTO); private set
+    /** Hardware or software: chosen per stream in Settings › Playback or the stream's menu. */
+    var decoderMode by mutableStateOf(DecoderMode.HARDWARE); private set
 
     var buffering by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
@@ -86,7 +86,6 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
 
     private var key: String? = null
     private var candidates: List<String> = emptyList()
-    private var headers: Map<String, String> = emptyMap()
 
     /** What's loaded (a channel id, a resume key…), or null when stopped. */
     val currentKey: String? get() = key
@@ -98,7 +97,34 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         start()
     }
 
+    // ---- for the player's video stats ----
+    var videoDecoder: String? = null; private set
+    var audioDecoder: String? = null; private set
+    var droppedFrames = 0L; private set
+    /** Estimated connection speed (bits per second), or 0 until known. */
+    var bandwidth = 0L; private set
+
+    /** The address playing now (which of the candidates worked). */
+    val currentUrl: String? get() = candidates.getOrNull(attempt)
+
     init {
+        player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onVideoDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                videoDecoder = decoderName
+            }
+
+            override fun onAudioDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                audioDecoder = decoderName
+            }
+
+            override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, count: Int, elapsedMs: Long) {
+                droppedFrames += count
+            }
+
+            override fun onBandwidthEstimate(eventTime: AnalyticsListener.EventTime, totalLoadTimeMs: Int, totalBytesLoaded: Long, bitrateEstimate: Long) {
+                bandwidth = bitrateEstimate
+            }
+        })
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
@@ -124,23 +150,16 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
                         player.seekToDefaultPosition()
                         player.prepare()
                     }
-                    isDecoderError(e) && !preferSoftware -> {
-                        // Another stream took this one's hardware decoder. Don't take it back (that
-                        // would kill the other stream); continue in software. In Automatic mode,
-                        // also remember the limit; a stream forced to hardware says nothing about it.
-                        if (decoderMode == DecoderMode.AUTO) DecoderBudget.learnFromFailure(this@StreamController)
-                        else DecoderBudget.release(this@StreamController)
-                        forcedSoftware = true
-                        start()
-                    }
                     isDecoderError(e) -> {
+                        // No switching to the other kind of decoding: the viewer chose this one.
+                        DecoderBudget.release(this@StreamController)
                         reconnecting = false
                         player.stop()
                         buffering = false
                         error = if (decoderMode == DecoderMode.SOFTWARE) {
-                            "Software decoding can't play this stream. Set this screen's video decoding to Hardware or Automatic."
+                            "Software decoding can't keep up with this stream. Set this screen's video decoding to Hardware."
                         } else {
-                            "This TV can't decode another video right now. Try a layout with fewer screens."
+                            "This TV has no hardware video decoder free for another stream. Use fewer screens, or set this screen's video decoding to Software."
                         }
                     }
                     else -> fallback(describe(e))
@@ -153,12 +172,11 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
      * Starts [urls] unless this exact stream is already playing (so moving between the menus and the
      * full-screen player doesn't interrupt it). [startPositionMs] resumes seekable video.
      */
-    fun load(key: String, urls: List<String>, startPositionMs: Long = 0, headers: Map<String, String> = emptyMap()) {
+    fun load(key: String, urls: List<String>, startPositionMs: Long = 0) {
         val running = player.playbackState != Player.STATE_IDLE && !ended && error == null
         if (key == this.key && urls == candidates && running) return
         this.key = key
         candidates = urls
-        this.headers = headers
         startAt = startPositionMs.coerceAtLeast(0)
         ended = false
         attempt = 0
@@ -170,7 +188,6 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
     fun applyDecoderMode(mode: DecoderMode) {
         if (mode == decoderMode) return
         decoderMode = mode
-        forcedSoftware = false
         if (key == null) return
         if (seekable) startAt = player.currentPosition
         resetReconnects()
@@ -198,7 +215,7 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         if (player.isPlaying) {
             player.pause()
         } else {
-            // Live streams resume at the live edge; movies and recordings where they paused.
+            // Live streams resume at the live edge; recordings where they paused.
             if (player.isCurrentMediaItemLive || !player.isCurrentMediaItemSeekable) player.seekToDefaultPosition()
             player.play()
         }
@@ -210,7 +227,7 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
     val liveSeekable: Boolean
         get() = player.isCurrentMediaItemLive && player.isCurrentMediaItemSeekable && player.duration != C.TIME_UNSET && player.duration > 30_000
 
-    /** Back / forward work: movies, recordings, catch-up, and live streams with a rewind window. */
+    /** Back / forward work: recordings, catch-up, and live streams with a rewind window. */
     val canSeek: Boolean get() = seekable || liveSeekable
 
     /**
@@ -237,7 +254,7 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         player.seekTo((player.currentPosition + deltaMs).coerceIn(0, player.duration))
     }
 
-    /** Playback speed (movies and shows): 1 = normal. */
+    /** Playback speed (recordings): 1 = normal. */
     var speed: Float
         get() = player.playbackParameters.speed
         set(v) {
@@ -257,10 +274,15 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
             player.volume = v
         }
 
-    /** Caps resolution for small tiles, which saves bandwidth and decoder capacity on adaptive (HLS) streams. */
-    fun setMaxVideoSize(width: Int, height: Int) {
+    /**
+     * Caps resolution and frame rate for small tiles. Only adaptive (HLS) streams that offer
+     * smaller or 30 fps versions can follow it; a single-version stream (most TS channels) plays
+     * as it is, because every frame has to be decoded either way.
+     */
+    fun setMaxVideoSize(width: Int, height: Int, frameRate: Int = Int.MAX_VALUE) {
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .setMaxVideoSize(width, height)
+            .setMaxVideoFrameRate(frameRate)
             .build()
     }
 
@@ -304,20 +326,17 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
             error = "This channel has no stream address."
             return
         }
-        // Claim a hardware decoder if the device has one free (or this stream insists on one);
-        // otherwise decode in software.
+        // Decode the way this stream's position is set; never switched automatically.
         DecoderBudget.release(this)
-        preferSoftware = when (decoderMode) {
-            DecoderMode.SOFTWARE -> true
-            DecoderMode.HARDWARE -> forcedSoftware
-            DecoderMode.AUTO -> forcedSoftware || !DecoderBudget.canUseHardware()
-        }
+        preferSoftware = decoderMode == DecoderMode.SOFTWARE
         if (!preferSoftware) DecoderBudget.acquire(this)
         softwareDecoding = preferSoftware
+        droppedFrames = 0
+        videoDecoder = null
+        audioDecoder = null
         buffering = true
         cues = emptyList()
         loadToken++
-        dataSource.setDefaultRequestProperties(headers)
         player.stop() // codecs are chosen at prepare time, so start clean
         if (startAt > 0) player.setMediaItem(mediaItemFor(url), startAt) else player.setMediaItem(mediaItemFor(url))
         player.prepare()

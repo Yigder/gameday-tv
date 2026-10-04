@@ -37,6 +37,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -90,6 +91,7 @@ import com.gameday.tv.data.Channel
 import com.gameday.tv.data.Profile
 import com.gameday.tv.ui.theme.AppColors
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // ---------------------------------------------------------------------------------------------
 // Focusable surfaces and buttons
@@ -351,6 +353,86 @@ private fun Switch(on: Boolean, focused: Boolean) {
     }
 }
 
+/**
+ * A settings row with a slider: Left / Right move [value] by [step] within [range]. OK does
+ * nothing, so it can't be changed by accident while moving through a list.
+ */
+@Composable
+fun SliderRow(
+    title: String,
+    value: Int,
+    range: IntRange,
+    step: Int,
+    onChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    label: (Int) -> String = { it.toString() },
+) {
+    var focused by remember { mutableStateOf(false) }
+    FocusSurface(
+        onClick = {},
+        modifier = modifier
+            .fillMaxWidth()
+            .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { ev ->
+                val delta = when (ev.key) {
+                    Key.DirectionLeft -> -step
+                    Key.DirectionRight -> step
+                    else -> return@onPreviewKeyEvent false
+                }
+                // Holding the key repeats; both directions are always used up so focus stays here.
+                if (ev.type == KeyEventType.KeyDown) {
+                    val next = (value + delta).coerceIn(range)
+                    if (next != value) onChange(next)
+                }
+                true
+            },
+        focusedScale = 1.02f,
+        containerColor = Color.Transparent,
+        focusedContainerColor = Color(0xFFF1F1F1),
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        val fg = if (focused) Color.Black else AppColors.Text
+        val dim = if (focused) Color(0xFF444444) else AppColors.TextDim
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 11.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(12.dp))
+                if (focused) Icon(Icons.ChevronLeft, null, Modifier.size(18.dp), tint = if (value > range.first) fg else Color(0xFFBBBBBB))
+                Text(label(value), fontSize = 14.sp, fontWeight = FontWeight.Medium, color = if (focused) fg else dim, maxLines = 1)
+                if (focused) Icon(Icons.ChevronRight, null, Modifier.size(18.dp), tint = if (value < range.last) fg else Color(0xFFBBBBBB))
+            }
+            if (subtitle != null) Text(subtitle, fontSize = 12.sp, color = dim, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(10.dp))
+            val fraction = if (range.last > range.first) (value - range.first).toFloat() / (range.last - range.first) else 0f
+            Box(Modifier.fillMaxWidth().height(14.dp), contentAlignment = Alignment.CenterStart) {
+                Box(Modifier.fillMaxWidth().height(4.dp).background(if (focused) Color(0xFFCCCCCC) else Color(0x40FFFFFF), RoundedCornerShape(50)))
+                Box(Modifier.fillMaxWidth(fraction).height(4.dp).background(AppColors.Live, RoundedCornerShape(50)))
+                // The knob, centred on the end of the filled part.
+                Box(Modifier.fillMaxWidth(fraction.coerceAtLeast(0.001f)), contentAlignment = Alignment.CenterEnd) {
+                    Box(Modifier.offset(x = 7.dp).size(14.dp).background(if (focused) AppColors.Live else Color.White, CircleShape))
+                }
+            }
+        }
+    }
+}
+
+/** A score delay in seconds as "Off", "45 s", "1 min" or "1 min 30 s". */
+fun delayLabel(seconds: Int): String {
+    val m = seconds / 60
+    val s = seconds % 60
+    return when {
+        seconds <= 0 -> "Off"
+        m == 0 -> "$s s"
+        s == 0 -> "$m min"
+        else -> "$m min $s s"
+    }
+}
+
+/** How far the score delay goes, in seconds, and its step. */
+val SCORE_DELAY_RANGE = 0..180
+const val SCORE_DELAY_STEP = 5
+
 // ---------------------------------------------------------------------------------------------
 // Text input & on-screen keyboard
 // ---------------------------------------------------------------------------------------------
@@ -398,6 +480,8 @@ fun TvTextField(
             returnFocus = false
         }
     }
+    // Back reaches the back handlers directly (see MainActivity), so it ends editing here.
+    androidx.activity.compose.BackHandler(enabled = editing) { finish(false) }
 
     Column(modifier) {
         if (label != null) {
@@ -739,9 +823,22 @@ fun Modifier.rememberFocus(vm: AppViewModel, screenKey: String, itemKey: String)
     LaunchedEffect(restore) {
         if (restore && requester.requestFocusSafely(80)) vm.restoreFocusFor = null
     }
+    // In a card row: register with the row so coming back to it lands here (see cardRow).
+    val row = LocalRowFocus.current
+    if (row != null) {
+        DisposableEffect(row, itemKey) {
+            row.requesters[itemKey] = requester
+            onDispose { if (row.requesters[itemKey] === requester) row.requesters.remove(itemKey) }
+        }
+    }
     return this
         .focusRequester(requester)
-        .onFocusChanged { if (it.isFocused) vm.focusMemory[screenKey] = itemKey }
+        .onFocusChanged {
+            if (it.isFocused) {
+                vm.focusMemory[screenKey] = itemKey
+                row?.lastKey = itemKey
+            }
+        }
 }
 
 /** Whether focus is somewhere inside a container (see [trackFocus]). */
@@ -771,6 +868,35 @@ fun InitialFocus(vm: AppViewModel, screenKey: String, default: FocusRequester, k
 }
 
 /**
+ * Back on a long list (Sports, Live): first it glides back to the top and puts focus on
+ * [top]; once there, Back does what it normally does (another tab, exit).
+ */
+@Composable
+fun BackToTop(state: androidx.compose.foundation.lazy.LazyListState, top: FocusRequester) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val scrolled by remember(state) { androidx.compose.runtime.derivedStateOf { state.firstVisibleItemIndex > 0 } }
+    fun tryFocus(): Boolean = try {
+        top.requestFocus(FocusDirection.Enter)
+    } catch (_: IllegalStateException) {
+        false
+    }
+    androidx.activity.compose.BackHandler(enabled = scrolled) {
+        scope.launch {
+            // Something above the list (filter chips) can take focus right away; a target inside the
+            // list only exists once the list is back at the top.
+            val focusedFirst = tryFocus()
+            state.animateScrollToItem(0)
+            if (!focusedFirst) {
+                repeat(10) {
+                    if (tryFocus()) return@launch
+                    delay(50)
+                }
+            }
+        }
+    }
+}
+
+/**
  * Scrolls a vertical list so the focused row sits near the top (TV "pivot" scrolling), instead of
  * the minimum scroll. Rows inside get the default behavior back via [DefaultScroll].
  */
@@ -782,6 +908,11 @@ fun PivotScroll(offset: Dp, content: @Composable () -> Unit) {
     val spec = remember(px) {
         object : BringIntoViewSpec {
             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = offset - px
+
+            // A long, gentle ease-out instead of the default spring, which started abruptly.
+            @Deprecated("Still read by the scroll container")
+            override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> =
+                tween(durationMillis = 360, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f))
         }
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides spec, LocalDefaultScroll provides default) { content() }

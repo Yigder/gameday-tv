@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -89,7 +90,10 @@ fun MultiviewScreen(vm: AppViewModel) {
     var bugSignal by remember { mutableIntStateOf(0) }
     // The screen whose sidebar is open; focus returns there when the sidebar closes.
     var returnSlot by remember { mutableIntStateOf(vm.multiviewAudio) }
+    // Screens showing their video stats (turned on from a screen's menu).
+    val statsSlots = remember { androidx.compose.runtime.mutableStateListOf<Int>() }
     val layout = vm.multiviewLayout
+    val streams = rememberTileStreams(vm)
 
     fun open(s: Sidebar) {
         lastSidebar = s
@@ -104,8 +108,18 @@ fun MultiviewScreen(vm: AppViewModel) {
         sidebar = null
     }
 
+    // Back closes a sidebar; otherwise it leaves Multiview for the screen you're listening to.
+    BackHandler(enabled = sidebar == null) { vm.leaveMultiview() }
     BackHandler(enabled = sidebar != null) { closeSidebar() }
-    LaunchedEffect(Unit) { if (vm.multiviewCount == 0) open(Sidebar.Picker(0)) }
+    LaunchedEffect(Unit) {
+        // From a held OK: the channel carries on and the next screen's picker is open.
+        val pick = vm.multiviewPickSlot
+        vm.multiviewPickSlot = null
+        when {
+            pick != null -> open(Sidebar.Picker(pick))
+            vm.multiviewCount == 0 -> open(Sidebar.Picker(0))
+        }
+    }
     LaunchedEffect(sidebar, layout) {
         if (sidebar != null) return@LaunchedEffect
         val target = tileFocus[returnSlot.coerceAtMost(layout.screens - 1)]
@@ -126,11 +140,13 @@ fun MultiviewScreen(vm: AppViewModel) {
                 MultiviewTile(
                     vm = vm,
                     slot = slot,
+                    streams = streams,
                     modifier = modifier
                         .focusRequester(tileFocus[slot])
                         .then(pipFocusLinks(layout, slot, tileFocus)),
                     focusEnabled = sidebar == null,
                     bugSignal = bugSignal,
+                    videoStats = slot in statsSlots,
                     onFocused = { hintNonce++ },
                     onPick = { open(Sidebar.Picker(slot)) },
                     onMenu = { open(Sidebar.Options(slot)) },
@@ -168,9 +184,9 @@ fun MultiviewScreen(vm: AppViewModel) {
         ) {
             Text(
                 if (layout.screens == 1) {
-                    "OK  Screen menu · add screens · layout      Info  Score      BACK  Exit"
+                    "OK  Screen menu · add screens · layout      ▲  Score      BACK  Full screen"
                 } else {
-                    "◀▲▼▶  Switch screen (audio follows)      OK  Screen menu · layout      Info  Scores      BACK  Exit"
+                    "◀▲▼▶  Switch screen (audio follows)      OK  Screen menu · layout      ▲  Scores      BACK  Full screen"
                 },
                 fontSize = 13.sp,
                 color = AppColors.Text,
@@ -205,6 +221,12 @@ fun MultiviewScreen(vm: AppViewModel) {
                     },
                     onRemove = {
                         vm.setMultiviewSlot(s.slot, null)
+                        statsSlots.remove(s.slot)
+                        closeSidebar()
+                    },
+                    videoStats = s.slot in statsSlots,
+                    onVideoStats = {
+                        if (!statsSlots.remove(s.slot)) statsSlots.add(s.slot)
                         closeSidebar()
                     },
                     onAddScreen = {
@@ -221,6 +243,63 @@ fun MultiviewScreen(vm: AppViewModel) {
             }
         }
     }
+}
+
+/**
+ * Each channel's player, kept by channel rather than by screen: adding a screen, changing the
+ * layout or moving channels around carries on playing instead of reconnecting. A channel that
+ * came from full screen keeps using the shared player ([AppViewModel.mainStream]).
+ */
+private class TileStreams(private val context: android.content.Context, private val vm: AppViewModel) {
+    private val own = HashMap<String, StreamController>()
+
+    fun forChannel(channel: Channel): StreamController =
+        if (vm.multiviewUsesMain(channel)) vm.mainStream
+        else own.getOrPut(channel.id) { StreamController(context, handleAudioFocus = false) }
+
+    fun isShared(stream: StreamController): Boolean = vm.hasMainStream && stream === vm.mainStream
+
+    /** Lets go of the players of channels no longer on a screen. */
+    fun keepOnly(ids: Set<String>) {
+        own.keys.filter { it !in ids }.forEach { own.remove(it)?.release() }
+        if (vm.multiviewMainId?.let { it !in ids } == true) vm.releaseMultiviewMain()
+    }
+
+    fun forEachOwn(block: (StreamController) -> Unit) = own.values.forEach(block)
+
+    fun releaseAll() {
+        own.values.forEach { it.release() }
+        own.clear()
+    }
+}
+
+@Composable
+private fun rememberTileStreams(vm: AppViewModel): TileStreams {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val streams = remember { TileStreams(context, vm) }
+    val ids = (0 until vm.multiviewLayout.screens).mapNotNull { vm.multiview[it]?.id }.toSet()
+    LaunchedEffect(ids) { streams.keepOnly(ids) }
+    DisposableEffect(Unit) {
+        onDispose {
+            streams.releaseAll()
+            // Full screen again: no tile-sized cap on the shared player.
+            if (vm.hasMainStream) vm.mainStream.setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+        }
+    }
+    // In the background, free the connections (the shared player follows the app on its own).
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> streams.forEachOwn { it.onAppStopped() }
+                androidx.lifecycle.Lifecycle.Event.ON_START -> streams.forEachOwn { it.onAppStarted() }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    return streams
 }
 
 /** The PiP window sits inside the main one, so the D-pad needs explicit links between them. */
@@ -283,9 +362,11 @@ private fun MultiviewGrid(layout: MultiviewLayout, gap: Dp, tile: @Composable (s
 private fun MultiviewTile(
     vm: AppViewModel,
     slot: Int,
+    streams: TileStreams,
     modifier: Modifier,
     focusEnabled: Boolean,
     bugSignal: Int,
+    videoStats: Boolean,
     onFocused: () -> Unit,
     onPick: () -> Unit,
     onMenu: () -> Unit,
@@ -326,6 +407,8 @@ private fun MultiviewTile(
                         true
                     }
                     ev.type != KeyEventType.KeyDown -> false
+                    // Up shows every screen's score bug; with a screen above, focus still moves there.
+                    ev.key == Key.DirectionUp -> { onShowBugs(); false }
                     ev.key == Key.Menu -> { onMenu(); true }
                     ev.key in SCORE_KEYS -> { onShowBugs(); true }
                     else -> false
@@ -348,35 +431,55 @@ private fun MultiviewTile(
                 Text("Press OK to add a channel", fontSize = 12.sp, color = AppColors.TextDim)
             }
         } else {
+            val stream = streams.forChannel(channel)
             ActiveTile(
                 vm = vm,
                 slot = slot,
                 channel = channel,
+                stream = stream,
+                shared = streams.isShared(stream),
                 isAudio = isAudio,
                 focused = focused,
                 bugSignal = bugSignal,
                 onTop = layout == MultiviewLayout.TWO_PIP && slot == 1,
+                videoStats = videoStats,
             )
         }
     }
 }
 
 @Composable
-private fun ActiveTile(vm: AppViewModel, slot: Int, channel: Channel, isAudio: Boolean, focused: Boolean, bugSignal: Int, onTop: Boolean) {
-    // Tiles don't request audio focus: several players fighting over it would pause each other.
-    val stream = rememberStreamController(handleAudioFocus = false)
+private fun ActiveTile(
+    vm: AppViewModel,
+    slot: Int,
+    channel: Channel,
+    stream: StreamController,
+    shared: Boolean,
+    isAudio: Boolean,
+    focused: Boolean,
+    bugSignal: Int,
+    onTop: Boolean,
+    videoStats: Boolean,
+) {
+    // (Tiles' own players don't request audio focus: several fighting over it would pause each other.)
     val decoding = vm.decoderMode(DecoderSlot.multiview(slot))
-    // Before load(), so the first start already uses this screen's decoder.
-    LaunchedEffect(stream, decoding) { stream.applyDecoderMode(decoding) }
-    LaunchedEffect(stream.softwareDecoding) { vm.multiviewSoftware[slot] = stream.softwareDecoding }
+    // Before load(), so the first start already uses this screen's decoder. The shared player keeps
+    // its decoder: switching would restart the channel that just carried on.
+    if (!shared) {
+        LaunchedEffect(stream, decoding) { stream.applyDecoderMode(decoding) }
+        WatchStalls(stream)
+    }
+    LaunchedEffect(stream, stream.softwareDecoding) { vm.multiviewSoftware[slot] = stream.softwareDecoding }
     val candidates = remember(channel.id, vm.streamFormat) { vm.streamCandidates(channel) }
     val single = vm.multiviewLayout.screens == 1
-    LaunchedEffect(stream, single) { if (single) stream.setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE) else stream.setMaxVideoSize(1280, 720) }
-    LaunchedEffect(channel.id, candidates) {
+    // Volume first, so a new screen doesn't blare before it's muted.
+    LaunchedEffect(stream, isAudio, single) { stream.volume = if (isAudio || single) 1f else 0f }
+    LaunchedEffect(stream, single) { if (single) stream.setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE) else stream.setMaxVideoSize(1280, 720, frameRate = 30) }
+    // Already playing (moved to another screen, or carried on from full screen): nothing restarts.
+    LaunchedEffect(stream, channel.id, candidates) {
         stream.load(channel.id, candidates)
         vm.noteRecent(channel)
     }
-    LaunchedEffect(isAudio, single) { stream.volume = if (isAudio || single) 1f else 0f }
 
     val liveGame = remember(channel.id, vm.games) { vm.liveGameFor(channel) }
     val liveTournament = remember(channel.id, vm.tournaments) { if (liveGame == null) vm.liveTournamentFor(channel) else null }
@@ -407,28 +510,9 @@ private fun ActiveTile(vm: AppViewModel, slot: Int, channel: Channel, isAudio: B
         }
 
         EventBug(game, tournament, bug, Modifier.align(Alignment.TopEnd).padding(8.dp), compact = !single)
-
-        Row(
-            Modifier
-                .align(Alignment.BottomStart)
-                .padding(8.dp)
-                .background(Color(0xCC0B111B), RoundedCornerShape(6.dp))
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (isAudio) {
-                Text("🔊", fontSize = 11.sp)
-                Spacer(Modifier.width(6.dp))
-            }
-            Text(
-                cleanChannelName(channel.name),
-                fontSize = 12.sp,
-                fontWeight = if (focused || isAudio) FontWeight.Bold else FontWeight.Medium,
-                color = if (isAudio) AppColors.Accent else AppColors.Text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        if (videoStats) VideoStatsOverlay(stream, Modifier.align(Alignment.TopStart).padding(8.dp), compact = !single)
+        // No channel name over the picture: the highlighted screen is the one you hear, and its
+        // menu (OK) names the channel.
     }
 }
 
@@ -463,6 +547,8 @@ private fun ScreenMenu(
     onRemove: () -> Unit,
     onAddScreen: () -> Unit,
     onLayout: (MultiviewLayout) -> Unit,
+    videoStats: Boolean,
+    onVideoStats: () -> Unit,
 ) {
     val channel = vm.multiview[slot]
     val first = remember { FocusRequester() }
@@ -484,13 +570,15 @@ private fun ScreenMenu(
             if (channel != null) {
                 OptionRow("Watch full screen", onFullscreen)
                 OptionRow("Remove this screen's channel", onRemove)
+                OptionRow(if (videoStats) "Hide video stats" else "Video stats", onVideoStats,
+                    subtitle = if (videoStats) null else "Resolution, frame rate, codecs and more on this screen")
             }
             val decSlot = DecoderSlot.multiview(slot)
             val mode = vm.decoderMode(decSlot)
             OptionRow(
                 "Video decoding: ${mode.label}",
                 { vm.setDecoderMode(decSlot, mode.next()) },
-                subtitle = if (channel != null) decodingStatus(mode, vm.multiviewSoftware[slot] == true) else null,
+                subtitle = decodingStatus(mode),
             )
             if (vm.multiviewLayout.screens < 4) OptionRow("＋ Add a screen", onAddScreen)
         }

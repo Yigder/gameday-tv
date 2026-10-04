@@ -39,31 +39,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.text.Cue
 import androidx.tv.material3.Text
-import com.gameday.tv.data.SubtitleCue
 import com.gameday.tv.data.SubtitleStyle
-import com.gameday.tv.data.SubtitleTrack
 import com.gameday.tv.data.Subtitles
-import com.gameday.tv.ui.theme.AppColors
 
-/** Subtitles for what's playing: add-on tracks found for it, the one in use, and its timing. */
+/** Captions for what's playing. */
 @Stable
 class PlayerSubtitles {
-    /** Tracks from subtitle add-ons (and the source), preferred language first. */
-    var tracks by mutableStateOf<List<SubtitleTrack>>(emptyList())
-    var searching by mutableStateOf(false)
-    /** The add-on track showing; null shows the stream's own captions (when captions are on). */
-    var chosen by mutableStateOf<SubtitleTrack?>(null)
-    var cues by mutableStateOf<List<SubtitleCue>>(emptyList())
-    var loading by mutableStateOf(false)
-    /** Positive shows subtitles later, negative earlier. */
-    var delayMs by mutableLongStateOf(0L)
     /** The automatic language choice was made (the viewer's own choice is never overridden). */
     var decided = false
 }
 
 /**
- * Draws subtitles in the viewer's style: text [lines] (add-on files, or the stream's text captions)
- * and the stream's picture captions ([bitmaps], e.g. DVB and PGS).
+ * Draws captions in the viewer's style: the stream's text captions ([lines]) and its picture
+ * captions ([bitmaps], e.g. DVB and PGS).
  */
 @Composable
 fun SubtitleOverlay(lines: List<String>, bitmaps: List<Cue>, style: SubtitleStyle, modifier: Modifier = Modifier, scale: Float = 1f, sidePadding: androidx.compose.ui.unit.Dp = 64.dp) {
@@ -158,7 +146,7 @@ fun LazyListScope.subtitleStyleItems(vm: AppViewModel, prefix: String) {
         val langs = Subtitles.LANGUAGES.let { if (vm.subtitleLanguage in it) it else listOf(vm.subtitleLanguage) + it }
         SettingRow(
             "Language", { vm.updateSubtitleLanguage(langs[cycle(langs, langs.indexOf(vm.subtitleLanguage))]) },
-            subtitle = "Picked automatically from your subtitle add-ons when captions are on",
+            subtitle = "Picked automatically from the stream when captions are on",
             value = Subtitles.languageName(vm.subtitleLanguage),
         )
     }
@@ -194,20 +182,5 @@ fun LazyListScope.subtitleStyleItems(vm: AppViewModel, prefix: String) {
     }
     item(key = "$prefix-reset") {
         SettingRow("Reset to default", { vm.updateSubtitleStyle(SubtitleStyle()) })
-    }
-}
-
-/** A row with − and + buttons (subtitle timing). */
-@Composable
-fun StepperRow(title: String, value: String, onMinus: () -> Unit, onPlus: () -> Unit, subtitle: String? = null) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            if (subtitle != null) Text(subtitle, fontSize = 12.sp, color = AppColors.TextDim)
-        }
-        PillButton("−", onMinus)
-        Text(value, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.width(72.dp))
-        PillButton("+", onPlus)
-        Spacer(Modifier.width(2.dp))
     }
 }

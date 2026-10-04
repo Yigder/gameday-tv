@@ -1,5 +1,6 @@
 package com.gameday.tv.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,6 +40,9 @@ import com.gameday.tv.ui.theme.AppColors
 fun DialogHost(vm: AppViewModel, dialog: AppDialog) {
     val first = remember(dialog) { FocusRequester() }
     LaunchedEffect(dialog) { first.requestFocusSafely(120) }
+    // Registered after the screen's handlers (the menu is composed on top), so Back closes the
+    // menu even over the player or a tab.
+    BackHandler { vm.dismissDialog() }
     Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Color(0x99000000), Color(0xF2000000))))) {
         Column(
             Modifier
@@ -46,6 +50,9 @@ fun DialogHost(vm: AppViewModel, dialog: AppDialog) {
                 .width(420.dp)
                 .fillMaxHeight()
                 .background(Color(0xFF1F1F1F))
+                // The page is still underneath: without this, Up / Down past the first or last
+                // action moved focus onto whatever card was behind the menu.
+                .trapFocus()
                 .padding(horizontal = 28.dp, vertical = 36.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.Center,

@@ -3,7 +3,6 @@ package com.gameday.tv.data
 import android.net.Uri
 import android.util.JsonReader
 import android.util.JsonToken
-import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
@@ -35,22 +34,6 @@ interface IptvSource {
 
     /** Replay URL for a past airing, when the channel keeps catch-up. */
     fun catchupUrl(channel: Channel, program: Program): String? = null
-
-    // ---- movies & shows ----
-
-    val hasVod: Boolean get() = false
-
-    suspend fun loadMovies(): VodLibrary<Movie> = VodLibrary(emptyList(), emptyList())
-
-    suspend fun loadSeries(): VodLibrary<Series> = VodLibrary(emptyList(), emptyList())
-
-    suspend fun movieInfo(movie: Movie): MovieInfo? = null
-
-    suspend fun seriesInfo(series: Series): SeriesInfo = SeriesInfo(series, emptyList(), emptyMap())
-
-    fun movieUrl(movie: Movie): String? = movie.url
-
-    fun episodeUrl(episode: Episode): String? = null
 
     companion object {
         fun create(account: IptvAccount): IptvSource = when (account) {
@@ -144,80 +127,6 @@ class XtreamSource(account: IptvAccount.Xtream) : IptvSource {
         return "$base/timeshift/$userPath/$passPath/$minutes/$start/$id.ts"
     }
 
-    // ---- movies & shows ----
-
-    override val hasVod: Boolean get() = true
-
-    override suspend fun loadMovies(): VodLibrary<Movie> {
-        val categories = Http.withStream(apiUrl("get_vod_categories")) { readCategories(it) }
-        val movies = Http.withStream(apiUrl("get_vod_streams")) { readMovies(it) }
-        return VodLibrary(categories.map { VodCategory(it.key, it.value) }, movies)
-    }
-
-    override suspend fun loadSeries(): VodLibrary<Series> {
-        val categories = Http.withStream(apiUrl("get_series_categories")) { readCategories(it) }
-        val series = Http.withStream(apiUrl("get_series")) { readSeries(it) }
-        return VodLibrary(categories.map { VodCategory(it.key, it.value) }, series)
-    }
-
-    override suspend fun movieInfo(movie: Movie): MovieInfo? {
-        val root = runCatching { JSONObject(Http.getString(apiUrl("get_vod_info", "&vod_id=${movie.id}"))) }.getOrNull() ?: return null
-        val info = root.optJSONObject("info") ?: JSONObject()
-        val data = root.optJSONObject("movie_data") ?: JSONObject()
-        return MovieInfo(
-            plot = info.optString("plot").clean() ?: info.optString("description").clean(),
-            cast = info.optString("cast").clean() ?: info.optString("actors").clean(),
-            director = info.optString("director").clean(),
-            genre = info.optString("genre").clean(),
-            releaseDate = info.optString("releasedate").clean() ?: info.optString("release_date").clean(),
-            durationSecs = info.optString("duration_secs").clean()?.toIntOrNull(),
-            backdrop = firstImage(info.opt("backdrop_path")) ?: info.optString("movie_image").clean(),
-            rating = info.optString("rating").clean(),
-            ext = data.optString("container_extension").clean(),
-        )
-    }
-
-    override suspend fun seriesInfo(series: Series): SeriesInfo {
-        val root = JSONObject(Http.getString(apiUrl("get_series_info", "&series_id=${series.id}")))
-        val info = root.optJSONObject("info")
-        val merged = if (info == null) series else series.copy(
-            plot = series.plot ?: info.optString("plot").clean(),
-            genre = series.genre ?: info.optString("genre").clean(),
-            backdrop = series.backdrop ?: firstImage(info.opt("backdrop_path")),
-            poster = series.poster ?: info.optString("cover").clean(),
-        )
-        val bySeason = sortedMapOf<Int, MutableList<Episode>>()
-        fun addEpisode(o: JSONObject, seasonHint: Int) {
-            val id = o.optString("id").clean() ?: return
-            val season = o.optString("season").clean()?.toIntOrNull() ?: seasonHint
-            val ei = o.optJSONObject("info") ?: JSONObject()
-            bySeason.getOrPut(season) { ArrayList() } += Episode(
-                id = id,
-                seriesId = series.id,
-                season = season,
-                number = o.optString("episode_num").clean()?.toIntOrNull() ?: (bySeason[season]?.size ?: 0) + 1,
-                title = o.optString("title").clean() ?: "Episode",
-                plot = ei.optString("plot").clean(),
-                image = ei.optString("movie_image").clean(),
-                durationSecs = ei.optString("duration_secs").clean()?.toIntOrNull(),
-                ext = o.optString("container_extension").clean() ?: "mp4",
-            )
-        }
-        when (val eps = root.opt("episodes")) {
-            is JSONObject -> eps.keys().forEach { k ->
-                val arr = eps.optJSONArray(k) ?: return@forEach
-                arr.objects().forEach { addEpisode(it, k.toIntOrNull() ?: 1) }
-            }
-            is JSONArray -> eps.objects().forEach { addEpisode(it, 1) }
-        }
-        bySeason.values.forEach { list -> list.sortBy { it.number } }
-        return SeriesInfo(merged, bySeason.keys.toList(), bySeason)
-    }
-
-    override fun movieUrl(movie: Movie): String = "$base/movie/$userPath/$passPath/${movie.id}.${movie.ext}"
-
-    override fun episodeUrl(episode: Episode): String = "$base/series/$userPath/$passPath/${episode.id}.${episode.ext}"
-
     // ---- parsing ----
 
     private fun readCategories(input: InputStream): Map<String, String> {
@@ -296,109 +205,6 @@ class XtreamSource(account: IptvAccount.Xtream) : IptvSource {
         return out
     }
 
-    private fun readMovies(input: InputStream): List<Movie> {
-        val out = ArrayList<Movie>()
-        JsonReader(InputStreamReader(input, Charsets.UTF_8)).use { r ->
-            r.isLenient = true
-            if (r.peek() != JsonToken.BEGIN_ARRAY) return out
-            r.beginArray()
-            while (r.hasNext()) {
-                if (r.peek() != JsonToken.BEGIN_OBJECT) { r.skipValue(); continue }
-                var name: String? = null
-                var id: String? = null
-                var icon: String? = null
-                var cat: String? = null
-                var rating: String? = null
-                var added: String? = null
-                var ext: String? = null
-                r.beginObject()
-                while (r.hasNext()) {
-                    when (r.nextName()) {
-                        "name" -> name = r.nextValueString()
-                        "stream_id" -> id = r.nextValueString()
-                        "stream_icon" -> icon = r.nextValueString()
-                        "category_id" -> cat = r.nextValueString()
-                        "rating" -> rating = r.nextValueString()
-                        "added" -> added = r.nextValueString()
-                        "container_extension" -> ext = r.nextValueString()
-                        else -> r.skipValue()
-                    }
-                }
-                r.endObject()
-                val n = name?.trim()
-                if (!n.isNullOrEmpty() && id != null) {
-                    out += Movie(
-                        id = id,
-                        name = n,
-                        poster = icon?.takeIf { it.startsWith("http", true) },
-                        categoryId = cat,
-                        rating = rating?.toDoubleOrNull()?.takeIf { it > 0 },
-                        added = added?.toLongOrNull() ?: 0,
-                        ext = ext.clean() ?: "mp4",
-                    )
-                }
-            }
-            r.endArray()
-        }
-        return out
-    }
-
-    private fun readSeries(input: InputStream): List<Series> {
-        val out = ArrayList<Series>()
-        JsonReader(InputStreamReader(input, Charsets.UTF_8)).use { r ->
-            r.isLenient = true
-            if (r.peek() != JsonToken.BEGIN_ARRAY) return out
-            r.beginArray()
-            while (r.hasNext()) {
-                if (r.peek() != JsonToken.BEGIN_OBJECT) { r.skipValue(); continue }
-                var name: String? = null
-                var id: String? = null
-                var cover: String? = null
-                var cat: String? = null
-                var plot: String? = null
-                var genre: String? = null
-                var rating: String? = null
-                var release: String? = null
-                var backdrop: String? = null
-                var modified: String? = null
-                r.beginObject()
-                while (r.hasNext()) {
-                    when (r.nextName()) {
-                        "name" -> name = r.nextValueString()
-                        "series_id" -> id = r.nextValueString()
-                        "cover" -> cover = r.nextValueString()
-                        "category_id" -> cat = r.nextValueString()
-                        "plot" -> plot = r.nextValueString()
-                        "genre" -> genre = r.nextValueString()
-                        "rating" -> rating = r.nextValueString()
-                        "releaseDate", "release_date" -> release = r.nextValueString()
-                        "last_modified" -> modified = r.nextValueString()
-                        "backdrop_path" -> backdrop = r.nextFirstString()
-                        else -> r.skipValue()
-                    }
-                }
-                r.endObject()
-                val n = name?.trim()
-                if (!n.isNullOrEmpty() && id != null) {
-                    out += Series(
-                        id = id,
-                        name = n,
-                        poster = cover?.takeIf { it.startsWith("http", true) },
-                        categoryId = cat,
-                        plot = plot.clean(),
-                        genre = genre.clean(),
-                        rating = rating?.toDoubleOrNull()?.takeIf { it > 0 },
-                        releaseDate = release.clean(),
-                        backdrop = backdrop?.takeIf { it.startsWith("http", true) },
-                        lastModified = modified?.toLongOrNull() ?: 0,
-                    )
-                }
-            }
-            r.endArray()
-        }
-        return out
-    }
-
     companion object {
         private val CATCHUP_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd:HH-mm", Locale.US)
 
@@ -461,12 +267,6 @@ class XtreamSource(account: IptvAccount.Xtream) : IptvSource {
             }
         }
 
-        private fun firstImage(v: Any?): String? = when (v) {
-            is JSONArray -> (0 until v.length()).asSequence().map { v.optString(it) }.firstOrNull { it.startsWith("http", true) }
-            is String -> v.takeIf { it.startsWith("http", true) }
-            else -> null
-        }
-
         private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
     }
 }
@@ -492,13 +292,9 @@ class M3uSource(private val account: IptvAccount.M3u) : IptvSource {
     override fun streamUrls(channel: Channel, preferred: StreamFormat): List<String> = listOfNotNull(channel.url)
 
     override val xmltvUrl: String? get() = account.epgUrl?.takeIf { it.isNotBlank() } ?: playlist?.epgUrl
-
-    override val hasVod: Boolean get() = playlist?.movies?.items?.isNotEmpty() == true
-
-    override suspend fun loadMovies(): VodLibrary<Movie> = playlist?.movies ?: VodLibrary(emptyList(), emptyList())
 }
 
-class M3uPlaylist(val catalog: IptvCatalog, val movies: VodLibrary<Movie>, val epgUrl: String?)
+class M3uPlaylist(val catalog: IptvCatalog, val epgUrl: String?)
 
 object M3uParser {
     private val ATTR = Regex("""([A-Za-z0-9_-]+)="([^"]*)"""")
@@ -507,8 +303,6 @@ object M3uParser {
     fun parse(input: InputStream): M3uPlaylist {
         val channels = ArrayList<Channel>()
         val groups = LinkedHashSet<String>()
-        val movies = ArrayList<Movie>()
-        val movieGroups = LinkedHashMap<String, String>()
         val usedIds = HashSet<String>()
         var epgUrl: String? = null
         var name: String? = null
@@ -545,20 +339,8 @@ object M3uParser {
                         if (n != null) {
                             val g = group ?: "Uncategorized"
                             when {
-                                line.contains("/series/") -> Unit // episodes without show info aren't browsable
-                                isVod(line) -> {
-                                    val catId = movieGroups.getOrPut(g) { "m${movieGroups.size}" }
-                                    movies += Movie(
-                                        id = stableId("v", line, usedIds),
-                                        name = n,
-                                        poster = logo,
-                                        categoryId = catId,
-                                        rating = null,
-                                        added = 0,
-                                        ext = line.substringAfterLast('.').substringBefore('?').lowercase(),
-                                        url = line,
-                                    )
-                                }
+                                // Movies and episodes in the playlist aren't live channels.
+                                line.contains("/series/") || isVod(line) -> Unit
                                 else -> {
                                     groups += g
                                     channels += Channel(
@@ -578,8 +360,7 @@ object M3uParser {
                 }
             }
         }
-        val movieLibrary = VodLibrary(movieGroups.map { VodCategory(it.value, it.key) }, movies)
-        return M3uPlaylist(IptvCatalog(groups.toList(), channels), movieLibrary, epgUrl)
+        return M3uPlaylist(IptvCatalog(groups.toList(), channels), epgUrl)
     }
 
     /** Ids derived from the URL, so favorites and history survive playlist reorders. */
@@ -615,19 +396,4 @@ internal fun JsonReader.nextValueString(): String? = when (peek()) {
     JsonToken.BOOLEAN -> nextBoolean().toString()
     JsonToken.NULL -> { nextNull(); null }
     else -> { skipValue(); null }
-}
-
-/** A string, or the first string of an array (Xtream sends backdrop_path either way). */
-internal fun JsonReader.nextFirstString(): String? = when (peek()) {
-    JsonToken.BEGIN_ARRAY -> {
-        beginArray()
-        var first: String? = null
-        while (hasNext()) {
-            val v = nextValueString()
-            if (first == null && !v.isNullOrBlank()) first = v
-        }
-        endArray()
-        first
-    }
-    else -> nextValueString()
 }

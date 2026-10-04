@@ -21,7 +21,7 @@ class M3uParserTest {
     """.trimIndent()
 
     @Test
-    fun parsesChannelsGroupsAndSeparatesMovies() {
+    fun parsesChannelsGroupsAndSkipsMovies() {
         val parsed = M3uParser.parse(playlist.byteInputStream())
         val catalog = parsed.catalog
         assertEquals(3, catalog.channels.size)
@@ -41,10 +41,6 @@ class M3uParserTest {
         assertNull(abc.logo)
 
         assertEquals("Misc", catalog.channels[2].group)
-
-        assertEquals(1, parsed.movies.items.size)
-        assertEquals("Some Movie (2024)", parsed.movies.items[0].name)
-        assertEquals("Movies", parsed.movies.categories.single().name)
     }
 
     @Test

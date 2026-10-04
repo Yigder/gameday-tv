@@ -1,19 +1,34 @@
 # GameDay TV
 
-A live TV and sports app for Android TV, built around **your IPTV service** and designed to work like YouTube TV. It has Sports, Live, On Demand and Library tabs, a program guide, a DVR, Multiview, movies and shows, profiles, and live scores for every game. Pick a game and it finds the channel in your lineup that's showing it.
+A live TV and sports app for Android TV, built around **your IPTV service** and designed to work like YouTube TV. It's all about sports and live TV: Sports, Live and Library tabs, a program guide, a DVR, Multiview, profiles, and live scores for every game. Pick a game and it finds the channel in your lineup that's showing it.
 
 **Install on Fire TV / Android TV:** open the [Downloader](https://www.aftvnews.com/downloader/) app and enter code **`3558070`**. It always fetches the [latest release](https://github.com/Yigder/gameday-tv/releases/latest).
 
 ## What's new in 2.4
 
+- **Just sports and live TV.** The On Demand tab is gone, along with everything that went with it: add-ons, TorBox, trailers, add-on subtitles, your provider's movies and shows, and saved movies and shows in the Library. Search covers games, teams, channels and what's on TV. Add-on links and the TorBox key saved on the TV are deleted.
 - **No more Home tab.** The app opens on Sports, which now also has the "Connect your TV provider" banner and the ready-made **Watch in Multiview** row. Back from another tab returns to Sports.
-- **On Demand looks like Nuvio's home:** the highlighted title fills the top of the screen (backdrop, logo, IMDb rating, year, genres and description) above rows of posters. Continue watching, Your list, your add-on catalogs, and your provider's movies and shows (moved here from Home) are all on this tab.
-- **Trailer previews.** Rest on a poster and it widens into the title's backdrop and plays its trailer, like Nuvio. Title pages play the trailer behind the details after a moment. Choose muted (the default), with sound or off in Settings › Playback › Trailer previews. Trailers come from the add-ons' YouTube links; when YouTube won't stream one, the card just shows its art.
-- **Movie and show player like Nuvio's:** title and episode at the bottom, a full-width progress bar (◀ ▶ scrub, faster when held), and a row of buttons: play/pause, next episode, subtitles, audio, sources (switch to another source of an add-on title without losing your place), episodes, and More (speed, picture size, settings). The clock and "Ends at" sit in the top-right corner.
+- **Recordings player:** title at the bottom, a full-width progress bar (◀ ▶ scrub, faster when held), and a row of buttons: restart, play/pause, subtitles, audio, and More (speed, picture size, settings, video stats). The clock and "Ends at" sit in the top-right corner.
 - **Live TV player:**
   - A **LIVE** button: red while you're watching live; grey when you're behind (paused, rewound, or in catch-up), and pressing it jumps back to live.
   - A **catch-up** button on channels with catch-up: start the current program over, or replay an earlier one from the provider's archive.
   - Back / forward are YouTube TV's circular arrows with the seconds inside (10 and 30). They also work on live streams that have a rewind window.
+  - Fewer buttons: LIVE, back / play / forward, catch-up, game stats and captions. Record, Multiview, favorite, video stats and settings are under **More**.
+  - **Hold OK for Multiview, like TiviMate:** the channel you're watching keeps playing (no reconnect) and the picker opens for a second screen. The Multiview button under More still opens the Multiview builder.
+  - **Hold Back for the guide:** channels with what's on now, and Live now / Coming up game cards, over the video, which keeps playing. Each has one filter (a channel group, or a sport). OK on a channel or live game switches to it; hold OK on a game to add it to Multiview next to what you're watching.
+- **Video decoding is Hardware or Software only.** The Automatic setting (which switched streams to software on its own) is gone, along with the learned decoder limit; Automatic reads as Hardware.
+- **Multiview screens keep playing** when you add a screen, change the layout or come back from full screen, instead of every screen reconnecting. The channel name no longer covers the bottom of each screen (a screen's menu shows it). ▲ shows every screen's score bug, and Back goes back to one screen (the one you're listening to) full screen.
+  - **Score delay slider** in the live player's settings (and Settings › Sports): ◀ ▶ moves it 5 seconds at a time, from off to 3 minutes, so the score bug can match the stream you're watching.
+- **Watch the live preview full screen:** on Sports and Live, move up onto the video playing at the top and press OK. Up from the video goes to the tab you're on.
+- **Video stats** in every player: resolution, frame rate, video and audio codecs, decoder, bitrates, connection speed, buffer and dropped frames. It's under More in the live and recordings players, and in each Multiview screen's menu.
+- **Back to the top:** on Sports and Live, Back from further down the page goes back to the top first.
+- **Smoother scrolling:** rows glide up as well as down.
+- **Sports header:** with no game highlighted, it shows the channel playing and what's on (from the guide).
+- **Golf:** a tournament is only in "Live now" while a round is being played (not overnight or once the day's play is complete), and golf channels only show its score bug then. Tournament cards show the tour's logo.
+- **Fixes:**
+  - Back closes menus, player panels and pages with one press (it used to take two).
+  - Up / Down in a long-press menu stays in the menu instead of jumping to the games and shows behind it, and closing a menu returns to the card it was opened from.
+  - Going back to a row lands on the card you left there, even after the row scrolled off screen (it used to pick whichever card lined up).
 
 ## What's new in 2.3
 
@@ -71,7 +86,7 @@ The whole app was rebuilt to look and work like YouTube TV:
 - **Movies and shows** from your provider (Xtream VOD and series). Includes resume, seasons and episodes, and autoplay of the next episode.
 - **Player** works like YouTube TV:
   - Round buttons along the bottom, with a progress bar for the program that's on.
-  - Start over (catch-up), Record and Multiview.
+  - Start over (catch-up), with Record and Multiview under More.
   - Stats: box score, scoring plays and leaders.
   - Captions, audio track, quality, picture size and stream format.
   - A channel or episode strip underneath.
@@ -93,13 +108,14 @@ Upgrading from 1.x? Create your account, and setup offers to reuse the IPTV logi
 - **Hide scores** keeps cards, pages, alerts and the score bug spoiler-free.
 - **Team pages** show the record, standing, schedule, results, team channels, Add to library and Record all games.
 - **IPTV login** supports two kinds:
-  - **Xtream Codes.** You get channels, the guide, catch-up, movies and shows. Pasted `get.php` links are converted automatically.
+  - **Xtream Codes.** You get channels, the guide and catch-up. Pasted `get.php` links are converted automatically.
   - **M3U playlist**, with an optional XMLTV guide.
 - **Playback** (Media3/ExoPlayer):
   - MPEG-TS and HLS, with automatic fallback to the other format.
   - Reconnects automatically when a stream drops.
   - Switches to software decoding when the TV runs out of hardware decoders.
-  - Video decoding can be set to Automatic, Hardware or Software separately for the full-screen player and each Multiview screen (Settings › Playback, the player's settings, or a Multiview screen's menu).
+  - Video decoding can be set to Hardware (the default) or Software separately for the full-screen player and each Multiview screen (Settings › Playback, the player's settings, or a Multiview screen's menu). It never switches on its own; a screen that can't get a hardware decoder says so.
+  - Multiview screens ask adaptive (HLS) streams for 720p and at most 30 fps when the stream offers those versions.
   - Streaming stops when the app goes to the background, which frees your provider's connection.
 
 ## Remote controls
@@ -109,16 +125,27 @@ Upgrading from 1.x? Create your account, and setup offers to reuse the IPTV logi
 | Button | Action |
 |---|---|
 | OK | Show the controls and the score (or retry after an error) |
-| ◀ / ▶ (controls hidden) | Back 10 s / forward 30 s in movies, recordings, catch-up and live streams with a rewind window |
+| ◀ / ▶ (controls hidden) | Back 10 s / forward 30 s in recordings, catch-up and live streams with a rewind window |
 | ◀ / ▶ (on the progress bar) | Scrub; hold to go faster |
-| ▲ (controls hidden) | Live TV: show or hide the score bug (nothing else). Movies and shows: show the controls |
+| ▲ (controls hidden) | Live TV: show or hide the score bug (nothing else). Recordings: show the controls |
 | ▼ (controls hidden) | Show the controls |
 | CH+ / CH− | Next / previous channel |
 | Info / Guide / Red / Green | Show or hide the score bug |
-| Hold OK | Multiview with this channel |
+| Hold OK (controls hidden) | Live TV: Multiview, with this channel still playing and a second screen to fill |
+| Hold Back | Live TV: the guide (channels and games) over the video, which keeps playing |
 | Menu | Playback settings |
 | Play/Pause, FF, Rewind | Pause / resume / seek |
-| Back | Hide the controls, then leave the player |
+| Back | Close the guide, hide the controls, then leave the player |
+
+**Guide (hold Back in the player)**
+
+| Button | Action |
+|---|---|
+| OK on a channel or live game | Watch it |
+| Hold OK on a game | Add to Multiview (what you're watching keeps playing beside it) or watch it |
+| OK on Channels / Sports | Switch between the channel list and the games |
+| OK on the filter (top right) | Pick a channel group (favorites, recent, sports channels, your provider's groups) or a sport |
+| Back | Close the filter list, then the guide |
 
 **Multiview**
 
@@ -126,10 +153,10 @@ Upgrading from 1.x? Create your account, and setup offers to reuse the IPTV logi
 |---|---|
 | ◀ ▲ ▼ ▶ | Move between screens. **The audio follows the highlighted screen** |
 | OK | Screen menu: change channel, watch full screen, remove, add a screen, layout |
-| Info | Show the score bugs on all screens |
-| Back | Close the menu / leave Multiview |
+| ▲ / Info | Show the score bugs on all screens that have a game (▲ still moves up when there's a screen above) |
+| Back | Close the menu; otherwise back to one screen, full screen, with the channel you were listening to |
 
-Each Multiview screen is a separate stream, so 4 screens need 4 connections from your provider. The builder only lets you pick as many as your plan allows.
+Each Multiview screen is a separate stream, so 4 screens need 4 connections from your provider (a channel carried on from full screen keeps its one connection). The builder only lets you pick as many as your plan allows.
 
 ## Recordings
 
@@ -141,9 +168,8 @@ Each Multiview screen is a separate stream, so 4 screens need 4 connections from
 ## Accounts and privacy
 
 - GameDay TV accounts are stored **only on the TV**. Passwords are kept as salted PBKDF2 hashes. There's no server and no email reset; a forgotten password means creating a new account.
-- Your IPTV logins, add-on links and TorBox key are encrypted with a key from the Android Keystore. Each is sent only to the service it belongs to.
-- "Send from your phone" runs a small web page on your home network only while that screen is open, at a random address, and takes one entry.
-- GameDay TV doesn't host or provide content. Add-ons are made by others; only stream content you have the rights to watch.
+- Your IPTV logins are encrypted with a key from the Android Keystore and sent only to your provider.
+- GameDay TV doesn't host or provide content.
 - Deleting an account removes its profiles, library, history and recordings from the TV.
 - Use this app only with an IPTV service you're legally licensed to use.
 
@@ -172,15 +198,13 @@ They cover:
 - password hashing
 - multiview rules
 - the OK-key gate
-- add-on manifests, catalogs, details, sources and trailers
-- subtitles (SubRip, WebVTT, SSA/ASS, encodings, languages, timing) and search ranking
-- TorBox responses and picking the right file from a season pack
+- caption languages and style
 - the score delay
 - multiple providers (ids, storage, combined lineups)
 
 ### Testing without an IPTV login
 
-`tools/mock-xtream` is a small fake Xtream Codes server. It has a few channels, a program guide with catch-up, movies and a show, all pointing at public sample videos. See [tools/mock-xtream/README.md](tools/mock-xtream/README.md).
+`tools/mock-xtream` is a small fake Xtream Codes server. It has a few channels and a program guide with catch-up, all pointing at public sample videos. See [tools/mock-xtream/README.md](tools/mock-xtream/README.md).
 
 ## Installing with ADB
 
@@ -195,16 +219,13 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 app/src/main/java/com/gameday/tv/
   MainActivity.kt              entry point, screen routing, dialogs, toasts
   data/
-    Models.kt                  channels, guide, movies & shows, games, accounts, recordings
+    Models.kt                  channels, guide, games, accounts, recordings
     SettingsStore.kt           accounts (PBKDF2), per-account and per-profile settings, 1.x import
     Security.kt                password hashing, Keystore-encrypted secrets
-    IptvSource.kt              Xtream Codes (live, guide, catch-up, VOD, series) + M3U
+    IptvSource.kt              Xtream Codes (live, guide, catch-up) + M3U
     Providers.kt               several providers per account, provider-scoped ids
-    Addons.kt                  Stremio add-on protocol: manifests, catalogs, details, sources
-    TorBox.kt                  TorBox: cache check, add torrent, pick file, stream link
-    Trailers.kt                YouTube trailer ids → a stream the player can play
     ScoreDelay.kt              delayed score history for the score bug and alerts
-    Subtitles.kt               subtitle add-ons, subtitle file parsing, languages, style
+    Subtitles.kt               caption languages and style
     Xmltv.kt                   streaming XMLTV guide parser
     ScoresRepository.kt        ESPN scoreboards, team schedules, game summaries (stats)
     ChannelMatcher.kt          game ↔ channel matching and search
@@ -213,21 +234,15 @@ app/src/main/java/com/gameday/tv/
     StreamRecorder.kt          TS and HLS stream recorder
     RecordingService.kt        foreground recording service, alarm scheduling
   ui/
-    AppViewModel.kt            session, profiles, scores, provider, guide, VOD, playback, DVR, search
+    AppViewModel.kt            session, profiles, scores, provider, guide, playback, DVR, search
     MainShell.kt               top bar, tabs, live video behind the menus
     SportsTab.kt, LiveTab.kt, LibraryTab.kt, SearchScreen.kt, SettingsScreen.kt
-    OnDemandTab.kt             On Demand tab (Nuvio-style header, expanding posters)
-    OnDemandScreens.kt         title pages, "See all", source picker, add-on and TorBox setup
-    TrailerPreview.kt          trailer player for On Demand cards and title pages
-    AddonsModel.kt             add-on and TorBox state for an account
-    PhoneInput.kt              "send from your phone" page and QR code
     DisplayModes.kt            smooth motion (fastest refresh rate)
     AuthScreens.kt, OnboardingScreens.kt, ProfileScreens.kt
     SportsDetailScreens.kt     game, golf tournament and team pages
-    MediaDetailScreens.kt      channel, movie, show and browse pages
-    PlayerScreen.kt            player: YouTube TV-style for live TV, Nuvio-style for movies and shows; side panels
-    SubtitleUi.kt              subtitle drawing, style options and preview
-    OnDemandSearch.kt          On Demand search with suggestions as you type
+    ChannelScreen.kt           channel page: what's on and the schedule
+    PlayerScreen.kt            player: YouTube TV-style for live TV, a seekable player for recordings; side panels
+    SubtitleUi.kt              caption drawing, style options and preview
     MultiviewScreen.kt, MultiviewBuilderScreen.kt
     Cards.kt, ContentCards.kt, Components.kt, Menus.kt, Icons.kt, ScoreBugs.kt
     StreamPlayer.kt, DecoderBudget.kt, OkKeyGate.kt

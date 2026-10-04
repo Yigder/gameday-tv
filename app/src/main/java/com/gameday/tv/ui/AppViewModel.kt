@@ -18,14 +18,12 @@ import com.gameday.tv.data.ScopedSource
 import com.gameday.tv.data.ScoreSnapshots
 import com.gameday.tv.data.SportPick
 import com.gameday.tv.data.SubtitleStyle
-import com.gameday.tv.data.VodLibrary
 import com.gameday.tv.data.AccountPrefs
 import com.gameday.tv.data.AccountStore
 import com.gameday.tv.data.AppAccount
 import com.gameday.tv.data.Channel
 import com.gameday.tv.data.ChannelMatch
 import com.gameday.tv.data.ChannelMatcher
-import com.gameday.tv.data.Episode
 import com.gameday.tv.data.FavoriteTeam
 import com.gameday.tv.data.Game
 import com.gameday.tv.data.GameState
@@ -37,8 +35,6 @@ import com.gameday.tv.data.IptvSource
 import com.gameday.tv.data.League
 import com.gameday.tv.data.Leagues
 import com.gameday.tv.data.LegacySettings
-import com.gameday.tv.data.Movie
-import com.gameday.tv.data.MovieInfo
 import com.gameday.tv.data.MultiviewLayout
 import com.gameday.tv.data.MultiviewRules
 import com.gameday.tv.data.Profile
@@ -47,12 +43,8 @@ import com.gameday.tv.data.Program
 import com.gameday.tv.data.RecStatus
 import com.gameday.tv.data.Recording
 import com.gameday.tv.data.ResumePoint
-import com.gameday.tv.data.SavedItem
-import com.gameday.tv.data.SavedKind
 import com.gameday.tv.data.ScoreBugMode
 import com.gameday.tv.data.ScoresRepository
-import com.gameday.tv.data.Series
-import com.gameday.tv.data.SeriesInfo
 import com.gameday.tv.data.StreamFormat
 import com.gameday.tv.data.TeamInfo
 import com.gameday.tv.data.Tournament
@@ -82,9 +74,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val legacy = LegacySettings(app)
     private val scoresRepo = ScoresRepository()
 
-    /** Streaming add-ons and TorBox (On Demand). */
-    val addons = AddonsModel(this)
-
     // =============================================================================================
     // Navigation
     // =============================================================================================
@@ -96,8 +85,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Remembers the focused item per screen, so coming back lands where the viewer left off. */
     val focusMemory = HashMap<String, String>()
-    /** Screen key whose remembered focus should be restored (set when navigating back to it). */
-    var restoreFocusFor: String? = null
+
+    /**
+     * Screen key whose remembered focus should be restored (set when navigating back to it, or when
+     * a menu closes). State, so cards already on screen see it; it expires after a moment so a card
+     * that only scrolls into view later can't pull focus to itself.
+     */
+    var restoreFocusFor by mutableStateOf<String?>(null)
+    private var restoreJob: Job? = null
+
+    private fun restoreFocusTo(key: String?) {
+        restoreJob?.cancel()
+        restoreFocusFor = key
+        if (key != null) restoreJob = viewModelScope.launch {
+            delay(2_000)
+            if (restoreFocusFor == key) restoreFocusFor = null
+        }
+    }
+
+    /** The key [rememberFocus] uses for what's on screen (Main's tabs remember focus per tab). */
+    private val focusScope: String get() = if (screen == Screen.Main) "main:$tab" else screen.key
 
     var message by mutableStateOf<String?>(null); private set
     private var messageJob: Job? = null
@@ -105,15 +112,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun navigate(s: Screen) {
         if (screen.key == s.key) return
-        restoreFocusFor = null
+        restoreFocusTo(null)
         backStack.add(s)
     }
 
     fun back() {
         if (backStack.size > 1) {
             backStack.removeAt(backStack.lastIndex)
-            // Main's tabs remember focus per tab.
-            restoreFocusFor = if (screen == Screen.Main) "main:$tab" else screen.key
+            restoreFocusTo(focusScope)
         }
     }
 
@@ -124,7 +130,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun resetTo(s: Screen) {
         backStack.clear()
         backStack.add(s)
-        restoreFocusFor = null
+        restoreFocusTo(null)
     }
 
     /** When a tab opens, should its content take focus? (Not while the viewer browses the top bar.) */
@@ -132,20 +138,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectTab(t: Tab, focusContent: Boolean = true) {
         tabWantsFocus = focusContent
-        if (t != tab) stopTrailer()
         tab = t
         heroFocus = null
         if (screen != Screen.Main) resetTo(Screen.Main)
-        // The library and On Demand have no live video header.
-        if (t == Tab.LIBRARY || t == Tab.ON_DEMAND) stopMainStream()
+        // The library has no live video header.
+        if (t == Tab.LIBRARY) stopMainStream()
     }
 
     fun openGame(game: Game) = navigate(Screen.GameDetail(game.id))
     fun openTournament(t: Tournament) = navigate(Screen.TournamentDetail(t.id))
     fun openTeam(leagueKey: String, teamId: String) = navigate(Screen.Team(leagueKey, teamId))
     fun openChannel(channel: Channel) = navigate(Screen.ChannelDetail(channel.id))
-    fun openMovie(movie: Movie) = navigate(Screen.MovieDetail(movie.id))
-    fun openSeries(series: Series) = navigate(Screen.SeriesDetail(series.id))
     fun openSettings(section: SettingsSection = SettingsSection.ACCOUNT) {
         settingsSection = section
         navigate(Screen.Settings(section))
@@ -173,7 +176,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun dismissDialog() {
+        if (dialog == null) return
         dialog = null
+        // The focused menu row is gone; put focus back on the card the menu was opened from instead
+        // of letting the next button press land on whatever Android picks. (An action that opens
+        // another screen calls navigate() right after, which cancels this.)
+        if (focusMemory[focusScope] != null) restoreFocusTo(focusScope)
     }
 
     fun confirm(title: String, message: String, confirmLabel: String, onConfirm: () -> Unit) {
@@ -264,7 +272,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         disconnectProviders()
         providers.addAll(prefs.providers)
         providers.filter { it.enabled }.forEach { connectOne(it) }
-        addons.enter(prefs)
+        prefs.forgetOnDemand()
 
         when {
             !prefs.onboarded -> {
@@ -287,9 +295,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun leaveAccount() {
         stopMainStream()
-        stopTrailer()
         disconnectProviders()
-        addons.leave()
         account = null
         accountPrefs = null
         profile = null
@@ -395,27 +401,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val acct = account ?: return
         profile = p
         val pp = ProfilePrefs(context, acct.id, p.id)
+        pp.forgetOnDemand()
         profilePrefs = pp
         enabledLeagues = pp.enabledLeagues
         favorites.replaceWith(pp.favoriteTeams)
         favoriteChannelIds.replaceWith(pp.favoriteChannels)
         recentChannelIds.replaceWith(pp.recentChannels)
         recentSearches.replaceWith(pp.recentSearches)
-        saved.replaceWith(pp.saved)
         resume.replaceWith(pp.resume)
         hideScores = pp.hideScores
         scoreBugMode = pp.scoreBugMode
         scoreAlerts = pp.scoreAlerts
         captions = pp.captions
-        autoplayNext = pp.autoplayNext
         scoreDelaySec = pp.scoreDelaySec
         backgroundVideo = pp.backgroundVideo
-        trailerPreviews = pp.trailerPreviews
         guideFilter = pp.guideFilter
         subtitleStyle = pp.subtitleStyle
         subtitleLanguage = pp.subtitleLanguage
         playerButtons = pp.playerButtons
-        recentOnDemandSearches.replaceWith(pp.recentOnDemandSearches)
         focusMemory.clear()
         alertedScores.clear()
         publishScores()
@@ -432,25 +435,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val favoriteChannelIds = mutableStateListOf<String>()
     val recentChannelIds = mutableStateListOf<String>()
     val recentSearches = mutableStateListOf<String>()
-    val saved = mutableStateListOf<SavedItem>()
     val resume = mutableStateListOf<ResumePoint>()
     var hideScores by mutableStateOf(false); private set
     var scoreBugMode by mutableStateOf(ScoreBugMode.ON_PRESS); private set
     var scoreAlerts by mutableStateOf(true); private set
     var captions by mutableStateOf(false); private set
-    var autoplayNext by mutableStateOf(true); private set
     var scoreDelaySec by mutableIntStateOf(60); private set
     /** "sound", "muted" or "off". */
     var backgroundVideo by mutableStateOf("sound"); private set
-    /** On Demand trailers on the focused card: "muted", "sound" or "off". */
-    var trailerPreviews by mutableStateOf("muted"); private set
     var guideFilter by mutableStateOf("sports"); private set
     var subtitleStyle by mutableStateOf(SubtitleStyle()); private set
-    /** ISO 639-1 code of the subtitle language picked automatically. */
+    /** ISO 639-1 code of the caption language picked automatically. */
     var subtitleLanguage by mutableStateOf("en"); private set
     /** "small", "medium" or "large". */
     var playerButtons by mutableStateOf("medium"); private set
-    val recentOnDemandSearches = mutableStateListOf<String>()
 
     private val teamsCache = HashMap<String, List<FavoriteTeam>>()
     private val scheduleCache = HashMap<String, Pair<Long, List<Game>>>()
@@ -583,27 +581,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun clearHistory() {
         recentChannelIds.clear()
         recentSearches.clear()
-        recentOnDemandSearches.clear()
         resume.clear()
-        profilePrefs?.apply { recentChannels = emptyList(); recentSearches = emptyList(); recentOnDemandSearches = emptyList(); resume = emptyList() }
+        profilePrefs?.apply { recentChannels = emptyList(); recentSearches = emptyList(); resume = emptyList() }
         showMessage("Watch and search history cleared")
     }
 
-    fun isSaved(kind: SavedKind, id: String) = saved.any { it.kind == kind && it.id == id }
-
-    fun toggleSaved(kind: SavedKind, id: String, title: String, image: String?) {
-        val i = saved.indexOfFirst { it.kind == kind && it.id == id }
-        if (i >= 0) {
-            saved.removeAt(i)
-            showMessage("Removed from your library")
-        } else {
-            saved.add(0, SavedItem(kind, id, title, image, System.currentTimeMillis()))
-            showMessage("Added to your library")
-        }
-        profilePrefs?.saved = saved.toList()
-    }
-
     fun resumeFor(key: String): ResumePoint? = resume.firstOrNull { it.key == key }
+
+    /** Continue watching: recordings started but not finished, most recent first. */
+    val continueWatching: List<ResumePoint> get() = resume.sortedByDescending { it.updatedAt }
 
     fun saveResume(item: VodItem, positionMs: Long, durationMs: Long) {
         resume.removeAll { it.key == item.key }
@@ -678,30 +664,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         playerButtons = size
     }
 
-    fun addRecentOnDemandSearch(q: String) {
-        val t = q.trim()
-        if (t.length < 2) return
-        recentOnDemandSearches.removeAll { it.equals(t, true) }
-        recentOnDemandSearches.add(0, t)
-        while (recentOnDemandSearches.size > 8) recentOnDemandSearches.removeAt(recentOnDemandSearches.lastIndex)
-        profilePrefs?.recentOnDemandSearches = recentOnDemandSearches.toList()
-    }
-
-    fun updateAutoplay(on: Boolean) {
-        profilePrefs?.autoplayNext = on
-        autoplayNext = on
-    }
-
     fun updateScoreDelay(seconds: Int) {
         profilePrefs?.scoreDelaySec = seconds
         scoreDelaySec = seconds
         alertedScores.clear()
-    }
-
-    fun updateTrailerPreviews(mode: String) {
-        profilePrefs?.trailerPreviews = mode
-        trailerPreviews = mode
-        if (mode == "off") stopTrailer() else trailerOrNull?.volume = if (mode == "sound") 1f else 0f
     }
 
     fun updateBackgroundVideo(mode: String) {
@@ -737,11 +703,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         dvrKeepDays = keepDays
         dvrPaddingMin = paddingMin
         accountPrefs?.apply { dvrCapGb = capGb; dvrKeepDays = keepDays; dvrPaddingMin = paddingMin }
-    }
-
-    fun resetDecoderLimit() {
-        DecoderBudget.reset()
-        showMessage("Video decoder limit reset")
     }
 
     /** Per-stream decoding choices, keyed by [DecoderSlot]. Saved for the device, not the account. */
@@ -923,12 +884,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun sourceFor(channel: Channel): ScopedSource? =
         sources[channel.providerId] ?: sources.values.firstOrNull { it.prefix == Providers.prefixOf(channel.id) }
 
-    /** The provider of a scoped movie / show / episode id. */
-    private fun sourceForId(id: String): ScopedSource? {
-        val prefix = Providers.prefixOf(id)
-        return sources.values.firstOrNull { it.prefix == prefix }
-    }
-
     fun providerName(channel: Channel): String? =
         if (providers.size < 2) null else providers.firstOrNull { it.id == channel.providerId }?.name
 
@@ -1007,8 +962,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun reloadChannels() {
-        movies = VodState.Idle
-        series = VodState.Idle
         providers.filter { it.enabled }.forEach { connectOne(it) }
     }
 
@@ -1019,8 +972,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         providerStatus.remove(id)
         providerInfo.remove(id)
         xmltvLoaded.remove(id)
-        movies = VodState.Idle
-        series = VodState.Idle
     }
 
     private fun disconnectProviders() {
@@ -1033,12 +984,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         providerStatus.clear()
         providerInfo.clear()
         iptv = IptvStatus.NotConfigured
-        movies = VodState.Idle
-        series = VodState.Idle
         epg.clear()
         epgFetched.clear()
-        movieInfoCache.clear()
-        seriesInfoCache.clear()
         xmltvLoaded.clear()
     }
 
@@ -1067,9 +1014,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         catalogs[id] = cat
         providerStatus[id] = IptvStatus.Ready(cat)
         if (info != null) providerInfo[id] = info else providerInfo.remove(id)
-        // New channels from this provider: movies and shows are combined again on next use.
-        movies = VodState.Idle
-        series = VodState.Idle
         rebuildCatalog()
         src.xmltvUrl?.let { loadXmltv(src, it, cat) }
         scheduleTeamRecordings()
@@ -1188,69 +1132,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---- movies & shows (all providers combined) ----
-
-    var movies by mutableStateOf<VodState<Movie>>(VodState.Idle); private set
-    var series by mutableStateOf<VodState<Series>>(VodState.Idle); private set
-    private val movieInfoCache = HashMap<String, MovieInfo?>()
-    private val seriesInfoCache = HashMap<String, SeriesInfo>()
-    private var moviesById: Map<String, Movie> = emptyMap()
-    private var seriesById: Map<String, Series> = emptyMap()
-
-    val hasVod: Boolean get() = sources.values.any { it.hasVod }
-
-    fun ensureMovies() {
-        if (movies !is VodState.Idle && movies !is VodState.Failed) return
-        val vod = providers.mapNotNull { sources[it.id] }.filter { it.hasVod }
-        if (vod.isEmpty()) return
-        movies = VodState.Loading
-        viewModelScope.launch {
-            val libs = coroutineScope { vod.map { s -> async { runCatching { s.loadMovies() } } }.awaitAll() }
-            val ok = libs.mapNotNull { it.getOrNull() }
-            movies = if (ok.isEmpty()) {
-                VodState.Failed(libs.firstNotNullOfOrNull { it.exceptionOrNull() }?.let(::friendly) ?: "Couldn't load movies.")
-            } else {
-                val lib = VodLibrary(ok.flatMap { it.categories }, ok.flatMap { it.items })
-                moviesById = withContext(Dispatchers.Default) { lib.items.associateBy { it.id } }
-                VodState.Ready(lib)
-            }
-        }
-    }
-
-    fun ensureSeries() {
-        if (series !is VodState.Idle && series !is VodState.Failed) return
-        val vod = providers.mapNotNull { sources[it.id] }.filter { it.hasSeries }
-        if (vod.isEmpty()) return
-        series = VodState.Loading
-        viewModelScope.launch {
-            val libs = coroutineScope { vod.map { s -> async { runCatching { s.loadSeries() } } }.awaitAll() }
-            val ok = libs.mapNotNull { it.getOrNull() }
-            series = if (ok.isEmpty()) {
-                VodState.Failed(libs.firstNotNullOfOrNull { it.exceptionOrNull() }?.let(::friendly) ?: "Couldn't load shows.")
-            } else {
-                val lib = VodLibrary(ok.flatMap { it.categories }, ok.flatMap { it.items })
-                seriesById = withContext(Dispatchers.Default) { lib.items.associateBy { it.id } }
-                VodState.Ready(lib)
-            }
-        }
-    }
-
-    fun movieById(id: String): Movie? = moviesById[id]
-    fun seriesById(id: String): Series? = seriesById[id]
-
-    suspend fun movieInfo(movie: Movie): MovieInfo? {
-        if (movieInfoCache.containsKey(movie.id)) return movieInfoCache[movie.id]
-        val info = runCatching { sourceForId(movie.id)?.movieInfo(movie) }.getOrNull()
-        movieInfoCache[movie.id] = info
-        return info
-    }
-
-    suspend fun seriesInfo(s: Series): SeriesInfo {
-        seriesInfoCache[s.id]?.let { return it }
-        val src = sourceForId(s.id) ?: return SeriesInfo(s, emptyList(), emptyMap())
-        return src.seriesInfo(s).also { seriesInfoCache[s.id] = it }
-    }
-
     // =============================================================================================
     // Playback
     // =============================================================================================
@@ -1306,63 +1187,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** The live channel list catch-up was started from, so "Live" returns to it (and CH+/CH− still work). */
     private var liveBeforeCatchup: PlayRequest.Live? = null
 
-    fun playMovie(movie: Movie) {
-        val url = sourceForId(movie.id)?.movieUrl(movie) ?: movie.url ?: return
-        playVod(listOf(VodItem("movie:${movie.id}:${movie.ext}", movie.name, "Movie", movie.poster, url)), 0)
-    }
-
-    fun playEpisodes(info: SeriesInfo, episode: Episode) {
-        val src = sourceForId(info.series.id) ?: return
-        val all = info.allEpisodes
-        val queue = all.mapNotNull { e ->
-            src.episodeUrl(e)?.let { url ->
-                VodItem("ep:${info.series.id}:${e.id}:${e.ext}", info.series.name, "S${e.season} E${e.number} · ${e.title}", e.image ?: info.series.poster, url)
-            }
-        }
-        val idx = all.indexOfFirst { it.id == episode.id }.coerceAtLeast(0)
-        if (queue.isNotEmpty()) playVod(queue, idx.coerceAtMost(queue.lastIndex))
-    }
-
-    /** Resume something from "Continue watching". */
+    /** Resume a recording from "Continue watching". */
     fun playResume(point: ResumePoint) {
-        if (point.key.startsWith("addon:")) {
-            // Add-on links expire: open the title and pick a source; playback resumes from here.
-            val (type, metaId, _) = AddonsModel.parseResumeKey(point.key) ?: return
-            navigate(Screen.AddonDetail(type, metaId))
+        val id = point.key.removePrefix("rec:")
+        val r = recordingsAll.firstOrNull { it.id == id }
+        if (r == null) {
+            removeResume(point.key)
+            showMessage("This recording was deleted")
             return
         }
-        val parts = point.key.split(':')
-        val src = when (parts.firstOrNull()) {
-            "movie" -> sourceForId(parts.getOrNull(1).orEmpty())
-            "ep" -> sourceForId(parts.getOrNull(2).orEmpty())
-            else -> null
-        }
-        when (parts.firstOrNull()) {
-            "movie" -> {
-                val movie = movieById(parts.getOrNull(1).orEmpty())
-                val url = when {
-                    movie != null -> src?.movieUrl(movie) ?: movie.url
-                    src != null && parts.size >= 3 -> src.movieUrl(Movie(parts[1], point.title, point.image, null, null, 0, parts[2]))
-                    else -> null
-                } ?: return showMessage("Connect your TV provider to keep watching")
-                playVod(listOf(VodItem(point.key, point.title, point.subtitle, point.image, url)), 0)
-            }
-            "ep" -> {
-                if (src == null || parts.size < 4) return showMessage("Connect your TV provider to keep watching")
-                val ep = Episode(parts[2], parts[1], 0, 0, point.subtitle, null, point.image, null, parts[3])
-                val url = src.episodeUrl(ep) ?: return
-                playVod(listOf(VodItem(point.key, point.title, point.subtitle, point.image, url)), 0)
-            }
-            "rec" -> recordingsAll.firstOrNull { it.id == parts.getOrNull(1) }?.let { playRecording(it) }
-        }
-    }
-
-    private fun playVod(queue: List<VodItem>, index: Int) = playVodItems(queue, index)
-
-    fun playVodItems(queue: List<VodItem>, index: Int) {
-        if (queue.isEmpty()) return
-        playback = PlayRequest.Vod(queue, index.coerceIn(queue.indices))
-        if (screen !is Screen.Player) navigate(Screen.Player)
+        playRecording(r)
     }
 
     // ---- the shared player: full screen, and live TV behind the menus (like YouTube TV) ----
@@ -1374,18 +1208,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         get() = mainStreamOrNull ?: StreamController(context, handleAudioFocus = true).also { mainStreamOrNull = it }
 
     val hasMainStream: Boolean get() = mainStreamOrNull != null
-
-    // ---- On Demand trailers (their own small player) ----
-
-    private var trailerOrNull: TrailerController? = null
-
-    /** Plays the focused title's trailer in On Demand. */
-    val trailer: TrailerController
-        get() = trailerOrNull ?: TrailerController(context).also { trailerOrNull = it }
-
-    fun stopTrailer() {
-        trailerOrNull?.stop()
-    }
 
     /** The live channel playing (or last played) in the shared player, shown behind the menus. */
     var backgroundChannel by mutableStateOf<Channel?>(null); private set
@@ -1401,6 +1223,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** The card focused on the main tabs: drives the header and which channel previews. */
     var heroFocus by mutableStateOf<HeroInfo?>(null)
 
+    // ---- the player's guide (hold Back): kept while the app runs, so it reopens the same way ----
+
+    /** 0 = channels, 1 = sports. */
+    var guideTab by mutableIntStateOf(0)
+    /** "fav", "recent", "all", "sports" or "g:<group>"; null = the playing channel's group. */
+    var guideChannelFilter by mutableStateOf<String?>(null)
+    /** "all", "mine" or a sport's key, like the Sports tab's chips. */
+    var guideSportsFilter by mutableStateOf("all")
+
     /** Plays [channel] behind the menus (muted or with sound, per Settings). */
     fun previewChannel(channel: Channel) {
         if (backgroundVideo == "off" || iptv !is IptvStatus.Ready) return
@@ -1409,6 +1240,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         s.volume = if (backgroundVideo == "sound") 1f else 0f
         s.load(channel.id, streamCandidates(channel))
         backgroundChannel = channel
+    }
+
+    /** The live video behind Sports / Live, full screen (it carries on without restarting). */
+    fun watchBackgroundFullScreen() {
+        val channel = backgroundChannel ?: return
+        playChannel(channel, eventId = liveGameFor(channel)?.id ?: liveTournamentFor(channel)?.id)
     }
 
     /** The full-screen player is showing [channel]; it keeps playing behind the menus afterwards. */
@@ -1429,11 +1266,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun onScreenChanged(s: Screen) {
         val from = lastScreen
         lastScreen = s
-        stopTrailer()
         val main = mainStreamOrNull ?: return
         when {
             s == Screen.Player -> main.volume = 1f
-            s == Screen.Main && backgroundVideo != "off" && backgroundChannel != null && tab != Tab.LIBRARY && tab != Tab.ON_DEMAND -> {
+            // A Multiview screen carrying on from full screen keeps the shared player (its screen
+            // sets the volume); anything else it was playing would only hold a connection.
+            s == Screen.Multiview -> {
+                val keep = multiview.firstOrNull { it?.id == multiviewMainId }?.let { multiviewUsesMain(it) } == true
+                if (!keep) {
+                    multiviewMainId = null
+                    stopMainStream()
+                }
+            }
+            s == Screen.Main && backgroundVideo != "off" && backgroundChannel != null && tab != Tab.LIBRARY -> {
                 main.volume = if (backgroundVideo == "sound") 1f else 0f
                 if (from == Screen.Player) keepBackgroundUntil = System.currentTimeMillis() + 4_000
             }
@@ -1444,8 +1289,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         mainStreamOrNull?.release()
         mainStreamOrNull = null
-        trailerOrNull?.release()
-        trailerOrNull = null
         super.onCleared()
     }
 
@@ -1461,18 +1304,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         playback = PlayRequest.Rec(r)
         if (screen !is Screen.Player) navigate(Screen.Player)
-    }
-
-    fun nextVod(): Boolean {
-        val p = playback as? PlayRequest.Vod ?: return false
-        if (p.index + 1 >= p.queue.size) return false
-        playback = p.copy(index = p.index + 1)
-        return true
-    }
-
-    fun jumpVod(index: Int) {
-        val p = playback as? PlayRequest.Vod ?: return
-        if (index in p.queue.indices) playback = p.copy(index = index)
     }
 
     fun zap(delta: Int) {
@@ -1518,6 +1349,92 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         for (i in multiview.indices) multiview[i] = null
         multiviewLayout = MultiviewLayout.ONE
         multiviewAudio = 0
+        multiviewMainId = null
+    }
+
+    /**
+     * The Multiview channel that plays in the shared player: it carried on from full screen (held
+     * OK) instead of reconnecting. Its screen uses [mainStream] while that is still playing it.
+     */
+    var multiviewMainId by mutableStateOf<String?>(null); private set
+
+    /** The screen to fill first when Multiview opens from a held OK (null: none). */
+    var multiviewPickSlot by mutableStateOf<Int?>(null)
+
+    /** [mainStream] is playing [channel] for its Multiview screen. */
+    fun multiviewUsesMain(channel: Channel): Boolean =
+        channel.id == multiviewMainId && mainStreamOrNull?.currentKey == channel.id
+
+    /** The shared player's channel left Multiview: stop it, so it stops using a connection. */
+    fun releaseMultiviewMain() {
+        if (multiviewMainId == null) return
+        multiviewMainId = null
+        stopMainStream()
+    }
+
+    /**
+     * Held OK in the player, like TiviMate: Multiview with [channel] carrying on (no reconnect)
+     * and a second screen to fill. Screens already in a running Multiview keep playing too.
+     */
+    fun quickMultiview(channel: Channel) {
+        if (iptv !is IptvStatus.Ready) {
+            showMessage("Connect a TV provider in Settings to watch")
+            return
+        }
+        val onScreen = (0 until multiviewLayout.screens).any { multiview[it]?.id == channel.id }
+        when {
+            multiviewCount == 0 -> {
+                clearMultiview()
+                multiview[0] = channel
+                multiviewLayout = MultiviewLayout.TWO
+                multiviewAudio = 0
+            }
+            !onScreen -> addToMultiview(channel)
+        }
+        multiviewMainId = channel.id
+        multiviewPickSlot = firstEmptyMultiviewSlot()
+        openQuickMultiview()
+    }
+
+    /**
+     * From the player's guide: Multiview with [current] (the live channel playing) carrying on and
+     * the event's best channel beside it. [current] null (catch-up): an ordinary Multiview start.
+     */
+    fun multiviewWithEvent(game: Game?, tournament: Tournament?, current: Channel?) {
+        viewModelScope.launch {
+            val matches = when {
+                game != null -> matchChannels(game)
+                tournament != null -> matchChannels(tournament)
+                else -> emptyList()
+            }
+            val add = matches.firstOrNull()?.channel
+            if (add == null) {
+                showMessage("No channel found for this game")
+                return@launch
+            }
+            if (current == null) {
+                multiviewWith(add)
+                return@launch
+            }
+            // The current channel carries on; the game's channel fills the next screen (no picker).
+            quickMultiview(current)
+            if (screen != Screen.Multiview || add.id == current.id) return@launch
+            val slot = multiviewPickSlot
+            multiviewPickSlot = null
+            when {
+                (0 until multiviewLayout.screens).any { multiview[it]?.id == add.id } -> Unit
+                slot != null -> setMultiviewSlot(slot, add)
+                else -> addToMultiview(add)
+            }
+        }
+    }
+
+    private fun openQuickMultiview() {
+        when (screen) {
+            is Screen.Player -> replace(Screen.Multiview)
+            is Screen.Multiview -> Unit
+            else -> navigate(Screen.Multiview)
+        }
     }
 
     /** YouTube TV style: pick up to four, then watch them together. */
@@ -1588,6 +1505,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         // Free the shared player's connection and decoder before the screens start.
+        multiviewMainId = null
         stopMainStream()
         // Never stack a full-screen player under multiview: it would hold an extra connection.
         when (screen) {
@@ -1597,9 +1515,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Back from Multiview: one screen again, full screen, with the channel you were listening to.
+     * The other screens close (CH+ / CH− still go through them). A channel that carried on from
+     * full screen keeps playing; the others reconnect in the full-screen player.
+     */
+    fun leaveMultiview() {
+        val channels = (0 until multiviewLayout.screens).mapNotNull { multiview[it] }
+        val ch = multiview.getOrNull(multiviewAudio)?.takeIf { it in channels } ?: channels.firstOrNull()
+        if (ch == null || iptv !is IptvStatus.Ready) {
+            clearMultiview()
+            back()
+            return
+        }
+        clearMultiview()
+        playback = PlayRequest.Live(channels, channels.indexOf(ch), null)
+        replace(Screen.Player)
+    }
+
     fun fullscreenFromMultiview(slot: Int) {
         val channels = (0 until multiviewLayout.screens).mapNotNull { multiview[it] }
         val ch = multiview[slot] ?: return
+        // Coming back, this screen carries on in the shared player instead of reconnecting.
+        multiviewMainId = ch.id
         play(channels, channels.indexOf(ch), null)
     }
 
@@ -1885,13 +1823,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (q.length < 2) return SearchResults()
         val n = ChannelMatcher.norm(q)
         // Teams of the followed leagues, fetched once.
-        val onDemand = viewModelScope.async { rankResults(runCatching { addons.search(q) }.getOrDefault(emptyList()), q) }
         coroutineScope {
             followedLeagues.filter { it.key !in allTeams }.map { l ->
                 async { runCatching { loadTeams(l) }.getOrNull()?.let { allTeams[l.key] = it } }
             }.awaitAll()
         }
-        val addonHits = onDemand.await()
         return withContext(Dispatchers.Default) {
             fun hit(s: String) = ChannelMatcher.norm(s).contains(n)
             val teams = allTeams.values.flatten().filter { hit(it.name) || it.abbreviation.equals(q, true) }.take(20)
@@ -1904,9 +1840,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val now = System.currentTimeMillis()
             val programs = epg.values.asSequence().flatten().filter { it.endMillis > now && hit(it.title) }
                 .sortedBy { it.startMillis }.take(40).toList()
-            val m = (movies as? VodState.Ready)?.library?.items.orEmpty().asSequence().filter { hit(it.name) }.take(40).toList()
-            val s = (series as? VodState.Ready)?.library?.items.orEmpty().asSequence().filter { hit(it.name) }.take(40).toList()
-            SearchResults(gamesHit, tours, teams, channels, programs, m, s, addonHits)
+            SearchResults(gamesHit, tours, teams, channels, programs)
         }
     }
 

@@ -1,57 +1,11 @@
 package com.gameday.tv.data
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class TorBoxAndDelayTest {
-    private fun stream(filename: String? = null, fileIdx: Int? = null) = AddonStream(
-        addon = "t", name = "t", description = "", url = null, infoHash = "a".repeat(40), fileIdx = fileIdx, filename = filename,
-        bingeGroup = null, headers = emptyMap(), externalUrl = null, trackers = emptyList(), sizeBytes = null,
-    )
-
-    @Test
-    fun cachedListAndObjectFormats() {
-        assertEquals(setOf("abc"), TorBoxClient.parseCached("""{"success":true,"data":[{"name":"x","hash":"ABC","size":1}]}"""))
-        assertEquals(setOf("def"), TorBoxClient.parseCached("""{"success":true,"data":{"def":{"name":"x","hash":"def"}}}"""))
-        assertEquals(emptySet<String>(), TorBoxClient.parseCached("""{"success":true,"data":null}"""))
-    }
-
-    @Test
-    fun torrentReadyAndFiles() {
-        val t = TorBoxClient.parseTorrent(
-            """{"success":true,"data":{"id":7,"download_present":true,"files":[{"id":0,"name":"Pack/Show.S01E01.mkv","short_name":"Show.S01E01.mkv","size":100},{"id":1,"name":"Pack/sample.mkv","size":5}]}}""",
-        )
-        assertTrue(t.ready)
-        assertEquals(listOf("Show.S01E01.mkv", "sample.mkv"), t.files.map { it.name })
-        assertFalse(TorBoxClient.parseTorrent("""{"data":{"download_present":false,"download_state":"downloading","files":[]}}""").ready)
-    }
-
-    @Test
-    fun picksEpisodeFromSeasonPack() {
-        val files = listOf(
-            TorBoxFile(0, "Show.S01E01.1080p.mkv", 1_000),
-            TorBoxFile(1, "Show.S01E02.1080p.mkv", 1_100),
-            TorBoxFile(2, "Show.S01E10.1080p.mkv", 1_200),
-            TorBoxFile(3, "Show.S01E02.sample.mkv", 10),
-            TorBoxFile(4, "info.nfo", 1),
-        )
-        assertEquals(1, TorBoxClient.pickFile(files, stream(), 1, 2)?.id)
-        assertEquals(2, TorBoxClient.pickFile(files, stream(), 1, 10)?.id)
-        // The add-on's file name wins.
-        assertEquals(0, TorBoxClient.pickFile(files, stream(filename = "Show.S01E01.1080p.mkv"), 1, 2)?.id)
-        // A movie: the biggest video.
-        assertEquals(2, TorBoxClient.pickFile(files, stream(), null, null)?.id)
-    }
-
-    @Test
-    fun picksXFormatEpisodes() {
-        val files = listOf(TorBoxFile(0, "Show 1x01.mp4", 5), TorBoxFile(1, "Show 1x02.mp4", 5))
-        assertEquals(1, TorBoxClient.pickFile(files, stream(), 1, 2)?.id)
-    }
-
+class DelayAndProvidersTest {
     @Test
     fun delayedHistoryReturnsWhatWasCurrentThen() {
         val h = DelayedHistory<String>()
