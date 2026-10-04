@@ -182,6 +182,10 @@ They cover:
 
 `tools/mock-xtream` is a small fake Xtream Codes server. It has a few channels, a program guide with catch-up, movies and a show, all pointing at public sample videos. See [tools/mock-xtream/README.md](tools/mock-xtream/README.md).
 
+### Publishing a release
+
+GitHub Actions builds and publishes releases (`.github/workflows/release.yml`): run **Actions › Release › Run workflow**, or push a tag like `v2.4.0`. It builds the signed APK, attaches it as `GameDayTV.apk`, and uses `.github/release-notes/v<version>.md` as the notes (the version comes from `versionName`). It needs the release signing key as repository secrets: `KEYSTORE_BASE64` (the keystore file, base64-encoded), `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`. Without them it stops instead of publishing a debug-signed APK, which couldn't update existing installs.
+
 ## Installing with ADB
 
 ```
