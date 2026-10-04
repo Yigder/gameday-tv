@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -51,6 +52,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -72,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.C
 import androidx.media3.common.TrackSelectionOverride
 import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Icon
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.gameday.tv.data.Channel
@@ -236,6 +239,8 @@ fun PlayerScreen(vm: AppViewModel) {
     // Sources for another episode (picked in Episodes); null = what's playing.
     var sourcesFor by remember { mutableStateOf<com.gameday.tv.data.MetaVideo?>(null) }
     var okLongPressed by remember { mutableStateOf(false) }
+    // Video stats stay up (over the video) until turned off, like YouTube's "stats for nerds".
+    var videoStats by remember { mutableStateOf(false) }
     val rootFocus = remember { FocusRequester() }
     val playFocus = remember { FocusRequester() }
     fun poke() { nonce++ }
@@ -389,6 +394,12 @@ fun PlayerScreen(vm: AppViewModel) {
         val bugTop by animateDpAsState(if (controls && panel == Panel.None) 92.dp else 24.dp, tween(260, easing = FastOutSlowInEasing), label = "bugTop")
         EventBug(linkedGame, linkedTournament, bug, Modifier.align(Alignment.TopEnd).padding(top = bugTop, end = 32.dp))
 
+        // Video stats: top left, below the channel name while the controls are up.
+        if (videoStats) {
+            val statsTop by animateDpAsState(if (controls && panel == Panel.None && live) 92.dp else 28.dp, tween(260, easing = FastOutSlowInEasing), label = "statsTop")
+            VideoStatsOverlay(stream, Modifier.align(Alignment.TopStart).padding(start = 48.dp, top = statsTop))
+        }
+
         AnimatedVisibility(
             visible = controls && panel == Panel.None,
             enter = fadeIn(),
@@ -397,7 +408,8 @@ fun PlayerScreen(vm: AppViewModel) {
         ) {
             if (req is PlayRequest.Vod || req is PlayRequest.Rec) {
                 // Movies, shows and recordings: Nuvio's player.
-                VodControls(vm, req, now, stream, playFocus, onPanel = { sourcesFor = null; panel = it }, onPoke = ::poke)
+                VodControls(vm, req, now, stream, playFocus, onPanel = { sourcesFor = null; panel = it }, onPoke = ::poke,
+                    videoStats = videoStats, onVideoStats = { videoStats = !videoStats })
             } else {
                 // Live TV and catch-up: YouTube TV's.
                 LiveControls(
@@ -410,6 +422,8 @@ fun PlayerScreen(vm: AppViewModel) {
                     onPanel = { panel = it },
                     onPoke = ::poke,
                     subs = subs,
+                    videoStats = videoStats,
+                    onVideoStats = { videoStats = !videoStats },
                 )
             }
         }
@@ -420,7 +434,7 @@ fun PlayerScreen(vm: AppViewModel) {
             exit = slideOutHorizontally { it },
             modifier = Modifier.align(Alignment.CenterEnd),
         ) {
-            linkedGame?.let { StatsPanel(vm, it) }
+            linkedGame?.let { Box(Modifier.trapFocus()) { StatsPanel(vm, it) } }
         }
 
         SidePanel(panel == Panel.Settings) {
@@ -459,7 +473,10 @@ private fun androidx.compose.foundation.layout.BoxScope.SidePanel(visible: Boole
         enter = slideInHorizontally { it },
         exit = slideOutHorizontally { it },
         modifier = Modifier.align(Alignment.CenterEnd),
-    ) { content() }
+    ) {
+        // Up / Down past the ends stay in the panel.
+        Box(Modifier.trapFocus()) { content() }
+    }
 }
 
 private fun describe(vm: AppViewModel, req: PlayRequest): Now = when (req) {
@@ -500,6 +517,8 @@ private fun LiveControls(
     onPanel: (Panel) -> Unit,
     onPoke: () -> Unit,
     subs: PlayerSubtitles,
+    videoStats: Boolean,
+    onVideoStats: () -> Unit,
 ) {
     val channel = now.channel
     val (btn, playBtn) = playerButtonSizes(vm.playerButtons)
@@ -621,7 +640,7 @@ private fun LiveControls(
                     }, active = rec != null, tint = if (rec != null) AppColors.Live else null)
                     IconCircleButton(Icons.Multiview, "Multiview", { vm.multiviewWith(channel) })
                 }
-                if (hasStats) IconCircleButton(Icons.Stats, "Stats", { onPanel(Panel.Stats) })
+                if (hasStats) IconCircleButton(Icons.Stats, "Game stats", { onPanel(Panel.Stats) })
                 IconCircleButton(Icons.Captions, if (vm.captions) "Captions on" else "Captions off", {
                     val on = !vm.captions
                     vm.updateCaptions(on)
@@ -629,6 +648,7 @@ private fun LiveControls(
                     if (on && !any && !subs.searching) vm.showMessage("No captions found for this channel")
                 }, active = vm.captions)
                 IconCircleButton(Icons.Settings, "Settings", { onPanel(Panel.Settings) })
+                IconCircleButton(Icons.VideoStats, "Video stats", onVideoStats, active = videoStats)
                 if (channel != null && req is PlayRequest.Live) {
                     val fav = vm.isFavoriteChannel(channel.id)
                     IconCircleButton(Icons.Star, if (fav) "Favorite" else "Add favorite", { vm.toggleFavoriteChannel(channel) }, active = fav)
@@ -694,6 +714,8 @@ private fun VodControls(
     playFocus: FocusRequester,
     onPanel: (Panel) -> Unit,
     onPoke: () -> Unit,
+    videoStats: Boolean,
+    onVideoStats: () -> Unit,
 ) {
     val (btn, playBtn) = playerButtonSizes(vm.playerButtons)
     var position by remember { mutableLongStateOf(0L) }
@@ -715,7 +737,18 @@ private fun VodControls(
     val addon = item?.key?.let { AddonsModel.parseResumeKey(it) }
     val queue = req as? PlayRequest.Vod
     val hasNext = (queue != null && queue.index + 1 < queue.queue.size) || item?.next != null
-    val hasEpisodes = (queue != null && queue.queue.size > 1) || (addon != null && addon.first != "movie" && addon.second != addon.third)
+    val addonEpisode = addon != null && addon.first != "movie" && addon.second != addon.third
+    val hasEpisodes = (queue != null && queue.queue.size > 1) || addonEpisode
+    // The add-on episode before this one, for Previous.
+    var addonPrevious by remember(item?.key) { mutableStateOf<AddonNext?>(null) }
+    if (addonEpisode) {
+        LaunchedEffect(item.key) {
+            val (type, metaId, videoId) = addon
+            val meta = runCatching { vm.addons.meta(type, metaId) }.getOrNull() ?: return@LaunchedEffect
+            addonPrevious = vm.addons.previousEpisode(meta, videoId, item.next?.bingeGroup)
+        }
+    }
+    val hasPrevious = (queue != null && queue.index > 0) || addonPrevious != null
     var more by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
@@ -742,6 +775,22 @@ private fun VodControls(
             CompositionLocalProvider(LocalButtonSize provides btn) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.Top) {
+                        // Restart; in the first seconds of an episode it goes to the previous one instead.
+                        // One button whose action changes, so focus stays on it as the position moves.
+                        val toPrevious = hasPrevious && position < PREVIOUS_WITHIN_MS
+                        IconCircleButton(if (toPrevious) Icons.SkipPrevious else Icons.Restart, if (toPrevious) "Previous episode" else "Restart", {
+                            if (toPrevious) {
+                                if (item != null && duration > 0) vm.saveResume(item, position, duration)
+                                val prev = addonPrevious
+                                when {
+                                    vm.previousVod() -> Unit
+                                    prev != null -> vm.addons.playPrevious(prev)
+                                }
+                            } else {
+                                stream.seekTo(0)
+                                position = 0
+                            }
+                        }, transparent = true)
                         IconCircleButton(if (playing) Icons.Pause else Icons.Play, if (playing) "Pause" else "Play", { stream.togglePause() },
                             Modifier.focusRequester(playFocus), size = playBtn, transparent = true)
                         if (hasNext) {
@@ -764,6 +813,7 @@ private fun VodControls(
                                 active = speed != 1f, transparent = true)
                             IconCircleButton(Icons.AspectRatio, if (stream.zoom) "Zoom to fill" else "Fit", { stream.zoom = !stream.zoom }, transparent = true)
                             IconCircleButton(Icons.Settings, "Settings", { onPanel(Panel.Settings) }, transparent = true)
+                            IconCircleButton(Icons.VideoStats, "Video stats", onVideoStats, active = videoStats, transparent = true)
                         }
                         IconCircleButton(if (more) Icons.ChevronLeft else Icons.ChevronRight, if (more) "Less" else "More", { more = !more }, transparent = true)
                     }
@@ -779,6 +829,9 @@ private fun VodControls(
         }
     }
 }
+
+/** Previous episode only this early in an episode; later the button restarts it. */
+private const val PREVIOUS_WITHIN_MS = 15_000L
 
 private fun speedLabel(speed: Float): String = if (speed % 1f == 0f) "${speed.toInt()}×" else "${speed}×"
 
@@ -1298,33 +1351,85 @@ private fun EpisodesPanel(
         state.scrollToItem(start)
         first.requestFocusSafely(150)
     }
-    LazyColumn(Modifier.width(440.dp).fillMaxHeight().background(Color(0xF2181818)), state = state, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp)) {
+    LazyColumn(Modifier.width(500.dp).fillMaxHeight().background(Color(0xF2181818)), state = state, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp)) {
         item(key = "title") { PanelTitle("Episodes") }
         when {
             !loaded -> item(key = "wait") { LoadingState("Loading episodes…") }
             ids != null && videos.isNotEmpty() -> itemsIndexed(videos, key = { _, v -> v.id }) { i, v ->
                 val now = v.id == currentId
-                SettingRow(
-                    "S${v.season} E${v.episode} · ${v.title}",
-                    { if (now) onDone() else onPickAddonEpisode(v) },
-                    if (i == start) Modifier.focusRequester(first) else Modifier,
-                    subtitle = if (now) "Playing now" else v.released?.let { formatDate(it) },
-                    checked = if (now) true else null,
+                val resume = vm.resumeFor(AddonsModel.resumeKey(ids.first, ids.second, v.id))
+                EpisodePanelRow(
+                    title = "S${v.season} E${v.episode} · ${v.title}",
+                    subtitle = when {
+                        now -> "Playing now"
+                        resume != null -> "${durationText(resume.durationMs - resume.positionMs)} left"
+                        else -> v.released?.let { formatDate(it) }
+                    },
+                    image = v.thumbnail ?: meta?.preview?.background ?: meta?.preview?.poster,
+                    progress = resume?.progress,
+                    playing = now,
+                    onClick = { if (now) onDone() else onPickAddonEpisode(v) },
+                    modifier = if (i == start) Modifier.focusRequester(first) else Modifier,
                 )
             }
             queue != null && queue.queue.size > 1 -> itemsIndexed(queue.queue, key = { _, e -> e.key }) { i, e ->
-                SettingRow(
-                    e.subtitle,
-                    { vm.jumpVod(i); onDone() },
-                    if (i == start) Modifier.focusRequester(first) else Modifier,
-                    subtitle = if (i == queue.index) "Playing now" else vm.resumeFor(e.key)?.let { "${durationText(it.durationMs - it.positionMs)} left" },
-                    checked = if (i == queue.index) true else null,
+                val resume = vm.resumeFor(e.key)
+                EpisodePanelRow(
+                    title = e.subtitle,
+                    subtitle = if (i == queue.index) "Playing now" else resume?.let { "${durationText(it.durationMs - it.positionMs)} left" },
+                    image = e.image,
+                    progress = resume?.progress,
+                    playing = i == queue.index,
+                    onClick = { vm.jumpVod(i); onDone() },
+                    modifier = if (i == start) Modifier.focusRequester(first) else Modifier,
                 )
             }
             else -> item(key = "none") {
                 Column {
                     PanelNote("No other episodes.")
                     SettingRow("OK", onDone, Modifier.focusRequester(first))
+                }
+            }
+        }
+    }
+}
+
+/** An episode in the Episodes panel: its thumbnail (with progress) beside the title. */
+@Composable
+private fun EpisodePanelRow(
+    title: String,
+    subtitle: String?,
+    image: String?,
+    progress: Float?,
+    playing: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var focused by remember { mutableStateOf(false) }
+    FocusSurface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused },
+        focusedScale = 1.02f,
+        containerColor = if (playing) Color(0x26FFFFFF) else Color.Transparent,
+        focusedContainerColor = Color(0xFFF1F1F1),
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(144.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(6.dp))) {
+                PosterThumb(image, title)
+                if (playing) {
+                    Box(Modifier.fillMaxSize().background(Color(0x80000000)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Play, null, Modifier.size(28.dp), tint = Color.White)
+                    }
+                }
+                if (progress != null && !playing) ProgressLine(progress, Modifier.align(Alignment.BottomCenter))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = if (focused) Color.Black else AppColors.Text,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 19.sp)
+                if (subtitle != null) {
+                    Text(subtitle, fontSize = 12.sp, color = if (focused) Color(0xFF444444) else AppColors.TextDim, maxLines = 1)
                 }
             }
         }

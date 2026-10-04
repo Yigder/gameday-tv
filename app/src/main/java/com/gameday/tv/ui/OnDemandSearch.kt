@@ -182,7 +182,7 @@ private fun Recommendations(vm: AppViewModel, screenKey: String, nav: RowNav, li
     val addons = vm.addons
     val rows = addons.rows.take(4)
     LaunchedEffect(rows.map { it.key }) { rows.forEach { addons.ensureRow(it) } }
-    val resume = vm.resume.filter { it.key.startsWith("addon:") }
+    val resume = vm.continueWatching.filter { it.key.startsWith("addon:") }
     PivotScroll(offset = ROW_TITLE) {
         LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 200.dp)) {
             item(key = "rec-title") { Text("Recommended", fontSize = 18.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 24.dp, bottom = 4.dp)) }

@@ -71,4 +71,36 @@ class GolfMatcherTest {
         assertEquals(dunhill, ChannelMatcher.findTournamentForChannel("UK: Sky Sports Golf HD", live))
         assertNull(ChannelMatcher.findTournamentForChannel("US: ESPN", live))
     }
+
+    @Test
+    fun golfChannelIsntTheTournamentBetweenRounds() {
+        // Tournament week (LIVE), but the day's play is complete.
+        val overnight = listOf(utah.copy(roundInProgress = false, detail = "Round 3 - Play Complete"))
+        assertNull(ChannelMatcher.findTournamentForChannel("US: Golf Channel HD", overnight))
+        assertNull(ChannelMatcher.findTournamentForChannel("PGA TOUR LIVE 1: Bank of Utah - Featured Groups", overnight))
+    }
+
+    @Test
+    fun roundIsOnlyLiveWhileBeingPlayed() {
+        assertTrue(roundIsBeingPlayed("in", "STATUS_IN_PROGRESS"))
+        assertFalse(roundIsBeingPlayed("post", "STATUS_PLAY_COMPLETE"))
+        assertFalse(roundIsBeingPlayed("in", "STATUS_PLAY_COMPLETE"))
+        assertFalse(roundIsBeingPlayed("in", "STATUS_SUSPENDED"))
+        assertFalse(roundIsBeingPlayed("pre", "STATUS_SCHEDULED"))
+    }
+
+    @Test
+    fun tourLogoPrefersTheDarkVersion() {
+        val pgaBoard = org.json.JSONObject(
+            """{"leagues":[{"abbreviation":"PGA","logos":[
+                {"href":"https://a.espncdn.com/i/teamlogos/leagues/500/pgatour.png","rel":["full","default"]},
+                {"href":"https://a.espncdn.com/i/teamlogos/leagues/500-dark/pgatour.png","rel":["full","dark"]}]}],"events":[]}""",
+        )
+        assertEquals("https://a.espncdn.com/i/teamlogos/leagues/500-dark/pgatour.png", leagueLogo(pgaBoard))
+        val eurBoard = org.json.JSONObject(
+            """{"leagues":[{"abbreviation":"EUR","logos":[{"href":"https://a.espncdn.com/i/espn/teamlogos/500/european_tour.png","rel":["full","default"]}]}]}""",
+        )
+        assertEquals("https://a.espncdn.com/i/espn/teamlogos/500/european_tour.png", leagueLogo(eurBoard))
+        assertNull(leagueLogo(org.json.JSONObject("""{"leagues":[{}]}""")))
+    }
 }

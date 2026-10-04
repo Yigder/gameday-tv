@@ -89,6 +89,8 @@ fun MultiviewScreen(vm: AppViewModel) {
     var bugSignal by remember { mutableIntStateOf(0) }
     // The screen whose sidebar is open; focus returns there when the sidebar closes.
     var returnSlot by remember { mutableIntStateOf(vm.multiviewAudio) }
+    // Screens showing their video stats (turned on from a screen's menu).
+    val statsSlots = remember { androidx.compose.runtime.mutableStateListOf<Int>() }
     val layout = vm.multiviewLayout
 
     fun open(s: Sidebar) {
@@ -131,6 +133,7 @@ fun MultiviewScreen(vm: AppViewModel) {
                         .then(pipFocusLinks(layout, slot, tileFocus)),
                     focusEnabled = sidebar == null,
                     bugSignal = bugSignal,
+                    videoStats = slot in statsSlots,
                     onFocused = { hintNonce++ },
                     onPick = { open(Sidebar.Picker(slot)) },
                     onMenu = { open(Sidebar.Options(slot)) },
@@ -205,6 +208,12 @@ fun MultiviewScreen(vm: AppViewModel) {
                     },
                     onRemove = {
                         vm.setMultiviewSlot(s.slot, null)
+                        statsSlots.remove(s.slot)
+                        closeSidebar()
+                    },
+                    videoStats = s.slot in statsSlots,
+                    onVideoStats = {
+                        if (!statsSlots.remove(s.slot)) statsSlots.add(s.slot)
                         closeSidebar()
                     },
                     onAddScreen = {
@@ -286,6 +295,7 @@ private fun MultiviewTile(
     modifier: Modifier,
     focusEnabled: Boolean,
     bugSignal: Int,
+    videoStats: Boolean,
     onFocused: () -> Unit,
     onPick: () -> Unit,
     onMenu: () -> Unit,
@@ -356,13 +366,14 @@ private fun MultiviewTile(
                 focused = focused,
                 bugSignal = bugSignal,
                 onTop = layout == MultiviewLayout.TWO_PIP && slot == 1,
+                videoStats = videoStats,
             )
         }
     }
 }
 
 @Composable
-private fun ActiveTile(vm: AppViewModel, slot: Int, channel: Channel, isAudio: Boolean, focused: Boolean, bugSignal: Int, onTop: Boolean) {
+private fun ActiveTile(vm: AppViewModel, slot: Int, channel: Channel, isAudio: Boolean, focused: Boolean, bugSignal: Int, onTop: Boolean, videoStats: Boolean) {
     // Tiles don't request audio focus: several players fighting over it would pause each other.
     val stream = rememberStreamController(handleAudioFocus = false)
     val decoding = vm.decoderMode(DecoderSlot.multiview(slot))
@@ -407,6 +418,7 @@ private fun ActiveTile(vm: AppViewModel, slot: Int, channel: Channel, isAudio: B
         }
 
         EventBug(game, tournament, bug, Modifier.align(Alignment.TopEnd).padding(8.dp), compact = !single)
+        if (videoStats) VideoStatsOverlay(stream, Modifier.align(Alignment.TopStart).padding(8.dp), compact = !single)
 
         Row(
             Modifier
@@ -463,6 +475,8 @@ private fun ScreenMenu(
     onRemove: () -> Unit,
     onAddScreen: () -> Unit,
     onLayout: (MultiviewLayout) -> Unit,
+    videoStats: Boolean,
+    onVideoStats: () -> Unit,
 ) {
     val channel = vm.multiview[slot]
     val first = remember { FocusRequester() }
@@ -484,6 +498,8 @@ private fun ScreenMenu(
             if (channel != null) {
                 OptionRow("Watch full screen", onFullscreen)
                 OptionRow("Remove this screen's channel", onRemove)
+                OptionRow(if (videoStats) "Hide video stats" else "Video stats", onVideoStats,
+                    subtitle = if (videoStats) null else "Resolution, frame rate, codecs and more on this screen")
             }
             val decSlot = DecoderSlot.multiview(slot)
             val mode = vm.decoderMode(decSlot)

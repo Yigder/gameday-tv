@@ -249,7 +249,9 @@ object ChannelMatcher {
     /** Best guess of which live tournament a channel is showing (event channel or listed broadcaster). */
     fun findTournamentForChannel(channelName: String, tournaments: List<Tournament>): Tournament? {
         val n = norm(channelName)
-        val live = tournaments.filter { it.state == GameState.LIVE }
+        // Only while a round is being played: golf channels show something all day, every day of a
+        // tournament week, and the score bug shouldn't claim it's the tournament overnight.
+        val live = tournaments.filter { it.roundInProgress }
         live.firstOrNull { sideHit(n, tournamentSide(it), false) != null }?.let { return it }
         if (isNonSports(n)) return null
         val vs = variants(n)

@@ -25,6 +25,7 @@ import com.gameday.tv.data.AppAccount
 import com.gameday.tv.data.Channel
 import com.gameday.tv.data.ChannelMatch
 import com.gameday.tv.data.ChannelMatcher
+import com.gameday.tv.data.ContinueWatching
 import com.gameday.tv.data.Episode
 import com.gameday.tv.data.FavoriteTeam
 import com.gameday.tv.data.Game
@@ -96,8 +97,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Remembers the focused item per screen, so coming back lands where the viewer left off. */
     val focusMemory = HashMap<String, String>()
-    /** Screen key whose remembered focus should be restored (set when navigating back to it). */
-    var restoreFocusFor: String? = null
+
+    /**
+     * Screen key whose remembered focus should be restored (set when navigating back to it, or when
+     * a menu closes). State, so cards already on screen see it; it expires after a moment so a card
+     * that only scrolls into view later can't pull focus to itself.
+     */
+    var restoreFocusFor by mutableStateOf<String?>(null)
+    private var restoreJob: Job? = null
+
+    private fun restoreFocusTo(key: String?) {
+        restoreJob?.cancel()
+        restoreFocusFor = key
+        if (key != null) restoreJob = viewModelScope.launch {
+            delay(2_000)
+            if (restoreFocusFor == key) restoreFocusFor = null
+        }
+    }
+
+    /** The key [rememberFocus] uses for what's on screen (Main's tabs remember focus per tab). */
+    private val focusScope: String get() = if (screen == Screen.Main) "main:$tab" else screen.key
 
     var message by mutableStateOf<String?>(null); private set
     private var messageJob: Job? = null
@@ -105,15 +124,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun navigate(s: Screen) {
         if (screen.key == s.key) return
-        restoreFocusFor = null
+        restoreFocusTo(null)
         backStack.add(s)
     }
 
     fun back() {
         if (backStack.size > 1) {
             backStack.removeAt(backStack.lastIndex)
-            // Main's tabs remember focus per tab.
-            restoreFocusFor = if (screen == Screen.Main) "main:$tab" else screen.key
+            restoreFocusTo(focusScope)
         }
     }
 
@@ -124,7 +142,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun resetTo(s: Screen) {
         backStack.clear()
         backStack.add(s)
-        restoreFocusFor = null
+        restoreFocusTo(null)
     }
 
     /** When a tab opens, should its content take focus? (Not while the viewer browses the top bar.) */
@@ -173,7 +191,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun dismissDialog() {
+        if (dialog == null) return
         dialog = null
+        // The focused menu row is gone; put focus back on the card the menu was opened from instead
+        // of letting the next button press land on whatever Android picks. (An action that opens
+        // another screen calls navigate() right after, which cancels this.)
+        if (focusMemory[focusScope] != null) restoreFocusTo(focusScope)
     }
 
     fun confirm(title: String, message: String, confirmLabel: String, onConfirm: () -> Unit) {
@@ -605,6 +628,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun resumeFor(key: String): ResumePoint? = resume.firstOrNull { it.key == key }
 
+    /** Continue watching: one card per show (its latest episode), plus movies and recordings. */
+    val continueWatching: List<ResumePoint> get() = ContinueWatching.latestPerShow(resume)
+
     fun saveResume(item: VodItem, positionMs: Long, durationMs: Long) {
         resume.removeAll { it.key == item.key }
         // Finished (or barely started) items drop out of "Continue watching".
@@ -616,6 +642,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun removeResume(key: String) {
         resume.removeAll { it.key == key }
+        profilePrefs?.resume = resume.toList()
+    }
+
+    /** Takes a card out of Continue watching: for a show, every episode's point goes with it. */
+    fun removeFromContinueWatching(key: String) {
+        val group = ContinueWatching.groupKey(key)
+        resume.removeAll { ContinueWatching.groupKey(it.key) == group }
         profilePrefs?.resume = resume.toList()
     }
 
@@ -1411,6 +1444,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         backgroundChannel = channel
     }
 
+    /** The live video behind Sports / Live, full screen (it carries on without restarting). */
+    fun watchBackgroundFullScreen() {
+        val channel = backgroundChannel ?: return
+        playChannel(channel, eventId = liveGameFor(channel)?.id ?: liveTournamentFor(channel)?.id)
+    }
+
     /** The full-screen player is showing [channel]; it keeps playing behind the menus afterwards. */
     fun noteWatching(channel: Channel?) {
         backgroundChannel = channel
@@ -1467,6 +1506,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val p = playback as? PlayRequest.Vod ?: return false
         if (p.index + 1 >= p.queue.size) return false
         playback = p.copy(index = p.index + 1)
+        return true
+    }
+
+    fun previousVod(): Boolean {
+        val p = playback as? PlayRequest.Vod ?: return false
+        if (p.index <= 0) return false
+        playback = p.copy(index = p.index - 1)
         return true
     }
 

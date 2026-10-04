@@ -37,6 +37,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -98,7 +99,34 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         start()
     }
 
+    // ---- for the player's video stats ----
+    var videoDecoder: String? = null; private set
+    var audioDecoder: String? = null; private set
+    var droppedFrames = 0L; private set
+    /** Estimated connection speed (bits per second), or 0 until known. */
+    var bandwidth = 0L; private set
+
+    /** The address playing now (which of the candidates worked). */
+    val currentUrl: String? get() = candidates.getOrNull(attempt)
+
     init {
+        player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onVideoDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                videoDecoder = decoderName
+            }
+
+            override fun onAudioDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                audioDecoder = decoderName
+            }
+
+            override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, count: Int, elapsedMs: Long) {
+                droppedFrames += count
+            }
+
+            override fun onBandwidthEstimate(eventTime: AnalyticsListener.EventTime, totalLoadTimeMs: Int, totalBytesLoaded: Long, bitrateEstimate: Long) {
+                bandwidth = bitrateEstimate
+            }
+        })
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
@@ -314,6 +342,9 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         }
         if (!preferSoftware) DecoderBudget.acquire(this)
         softwareDecoding = preferSoftware
+        droppedFrames = 0
+        videoDecoder = null
+        audioDecoder = null
         buffering = true
         cues = emptyList()
         loadToken++

@@ -33,6 +33,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
@@ -94,7 +95,7 @@ fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
     PreviewDirector(vm, tab)
 
     Box(Modifier.fillMaxSize().trackFocus(shellFocus)) {
-        videoFrameFor(tab)?.let { BackgroundVideo(vm, it) }
+        videoFrameFor(tab)?.let { BackgroundVideo(vm, it, up = tabFocus.getValue(tab)) }
 
         stateHolder.SaveableStateProvider("main:$tab") {
             when (tab) {
@@ -166,20 +167,60 @@ private fun PreviewDirector(vm: AppViewModel, tab: Tab) {
     }
 }
 
+/** [up]: where Up goes from the video — the open tab (it sits under the search and settings buttons). */
 @Composable
-private fun BackgroundVideo(vm: AppViewModel, frame: VideoFrame) {
+private fun BackgroundVideo(vm: AppViewModel, frame: VideoFrame, up: FocusRequester) {
     val channel = vm.backgroundChannel ?: return
     if (vm.backgroundVideo == "off") return
     val stream = vm.mainStream
     // Fade in once there's a picture (no black box while it connects).
     val showing = stream.currentKey == channel.id && !stream.buffering && stream.error == null
     val alpha by animateFloatAsState(if (showing) 1f else 0f, tween(450), label = "bgVideo")
+    var focused by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
-        Box(Modifier.fillMaxWidth(frame.widthFraction).height(frame.height).alpha(alpha)) {
-            BackgroundVideoSurface(stream, Modifier.fillMaxSize())
-            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to AppColors.Background, 0.3f to Color(0x800F0F0F), 0.6f to Color.Transparent)))
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color(0x990F0F0F), 0.25f to Color.Transparent, 0.7f to Color.Transparent, 1f to AppColors.Background)))
-            Row(Modifier.align(Alignment.BottomEnd).padding(end = 40.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.fillMaxWidth(frame.widthFraction).height(frame.height)) {
+            Box(Modifier.fillMaxSize().alpha(alpha)) {
+                BackgroundVideoSurface(stream, Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to AppColors.Background, 0.3f to Color(0x800F0F0F), 0.6f to Color.Transparent)))
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color(0x990F0F0F), 0.25f to Color.Transparent, 0.7f to Color.Transparent, 1f to AppColors.Background)))
+            }
+            // The video itself can be focused (Up from the rows or chips under it); OK opens it full
+            // screen, where it keeps playing without restarting.
+            val shape = RoundedCornerShape(10.dp)
+            Surface(
+                onClick = { vm.watchBackgroundFullScreen() },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .fillMaxWidth(0.68f)
+                    .fillMaxHeight()
+                    .padding(top = 70.dp, end = 28.dp, bottom = 6.dp)
+                    .focusProperties { this.up = up }
+                    .onFocusChanged {
+                        focused = it.isFocused
+                        // Nothing card-like is focused: the Sports header describes this channel.
+                        if (it.isFocused) vm.heroFocus = null
+                    },
+                shape = ClickableSurfaceDefaults.shape(shape = shape),
+                colors = ClickableSurfaceDefaults.colors(
+                    containerColor = Color.Transparent,
+                    focusedContainerColor = Color.Transparent,
+                    pressedContainerColor = Color(0x22FFFFFF),
+                ),
+                scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+                border = ClickableSurfaceDefaults.border(focusedBorder = Border(BorderStroke(3.dp, AppColors.Focus), shape = shape)),
+            ) {
+                if (focused) {
+                    Row(
+                        Modifier.align(Alignment.Center).background(Color(0xCC000000), RoundedCornerShape(50)).padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Fullscreen, null, Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Watch full screen", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+            Row(Modifier.align(Alignment.BottomEnd).alpha(alpha).padding(end = 40.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 LiveBadge(small = true)
                 Spacer(Modifier.width(6.dp))
                 Text(cleanChannelName(channel.name), fontSize = 12.sp, color = AppColors.Text, maxLines = 1)

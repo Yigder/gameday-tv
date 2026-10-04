@@ -10,7 +10,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -35,15 +33,12 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -79,23 +74,22 @@ private val OD_POSTER_HEIGHT: Dp = (OD_POSTER_WIDTH * 1.5f).dp
 /** How long focus rests on a poster before it widens (and its trailer starts loading). */
 private const val EXPAND_AFTER_MS = 900L
 
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun OnDemandTab(vm: AppViewModel) {
     val screenKey = "main:${Tab.ON_DEMAND}"
-    var kind by rememberSaveable { mutableStateOf("all") }
     val chips = remember { FocusRequester() }
-    val selectedChip = remember { FocusRequester() }
     if (vm.tabWantsFocus) InitialFocus(vm, screenKey, chips)
     val listState = rememberLazyListState()
     val nav = rememberRowNav(listState)
+    BackToTop(listState, chips)
 
     val addons = vm.addons
-    val rows = addons.rows.filter { kind == "all" || it.catalog.type == kind }
+    val rows = addons.rows
     val items = addons.rowItems
     val failed = addons.rowFailed
     LaunchedEffect(rows.map { it.key }) { rows.forEach { addons.ensureRow(it) } }
-    val resume by remember { derivedStateOf { vm.resume.filter { it.key.startsWith("addon:") || it.key.startsWith("movie:") || it.key.startsWith("ep:") } } }
+    // One card per show: the episode watched last.
+    val resume by remember { derivedStateOf { vm.continueWatching.filter { it.key.startsWith("addon:") || it.key.startsWith("movie:") || it.key.startsWith("ep:") } } }
     val saved by remember { derivedStateOf { vm.saved.toList() } }
 
     // Movies and shows from the TV provider sit after the add-on rows.
@@ -116,11 +110,6 @@ fun OnDemandTab(vm: AppViewModel) {
         if (addons.hasStreamAddons) null else "Add a streaming add-on in Settings › Add-ons to play titles.",
     )
 
-    fun choose(k: String) {
-        kind = k
-        vm.heroFocus = null
-    }
-
     Box(Modifier.fillMaxSize()) {
         OnDemandBackdrop(vm, defaultHero)
         Column(Modifier.fillMaxSize()) {
@@ -129,21 +118,9 @@ fun OnDemandTab(vm: AppViewModel) {
                 PivotScroll(offset = ROW_TITLE) {
                     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(top = 4.dp, bottom = 260.dp)) {
                         item(key = "chips") {
-                            DefaultScroll {
-                                LazyRow(
-                                    // Up from the rows comes back to the chosen filter, not the chip that lines up.
-                                    Modifier.focusRequester(chips).focusRestorer(selectedChip),
-                                    contentPadding = PaddingValues(start = 48.dp, end = 48.dp, bottom = 12.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    listOf("all" to "All", "movie" to "Movies", "series" to "Shows").forEach { (k, label) ->
-                                        item(key = k) {
-                                            Chip(label, kind == k, { choose(k) }, if (kind == k) Modifier.focusRequester(selectedChip) else Modifier)
-                                        }
-                                    }
-                                    item(key = "search") { Chip("Search", false, { vm.navigate(Screen.OnDemandSearch) }, icon = Icons.Search) }
-                                    item(key = "manage") { Chip("Add-ons", false, { vm.openSettings(SettingsSection.ADDONS) }, icon = Icons.Settings) }
-                                }
+                            // Movies and shows share the rows; add-ons are managed in Settings › Add-ons.
+                            Row(Modifier.padding(start = 48.dp, end = 48.dp, bottom = 12.dp).onFocusChanged { if (it.hasFocus) vm.heroFocus = null }) {
+                                Chip("Search", false, { vm.navigate(Screen.OnDemandSearch) }, Modifier.focusRequester(chips), icon = Icons.Search)
                             }
                         }
                         if (addons.installed.isEmpty() && !hasProvider) {
@@ -163,16 +140,14 @@ fun OnDemandTab(vm: AppViewModel) {
                                 }
                             }
                         }
-                        val resumeShown = resume.filter { kindMatches(kind, it) }
-                        if (resumeShown.isNotEmpty()) {
+                        if (resume.isNotEmpty()) {
                             cardRow("resume", "Continue watching", nav) {
-                                items(resumeShown, key = { "r:" + it.key }) { ContinueCard(vm, it, screenKey) }
+                                items(resume, key = { "r:" + it.key }) { ContinueCard(vm, it, screenKey) }
                             }
                         }
-                        val savedShown = saved.filter { kind == "all" || (kind == "movie") == it.isMovie }
-                        if (savedShown.isNotEmpty()) {
+                        if (saved.isNotEmpty()) {
                             cardRow("saved", "Your list", nav) {
-                                items(savedShown, key = { it.key }) { SavedPosterCard(vm, it, screenKey) }
+                                items(saved, key = { it.key }) { SavedPosterCard(vm, it, screenKey) }
                             }
                         }
                         rows.forEach { row ->
@@ -184,13 +159,13 @@ fun OnDemandTab(vm: AppViewModel) {
                                 }
                             }
                         }
-                        if (movies.isNotEmpty() && kind != "series") {
+                        if (movies.isNotEmpty()) {
                             cardRow("movies", "Movies from your provider", nav) {
                                 items(movies, key = { it.id }) { ProviderMovieCard(vm, it, screenKey) }
                                 item(key = "more") { MoreCard("All movies", { vm.navigate(Screen.Browse(BrowseKind.MOVIES)) }, OD_POSTER_WIDTH, 2f / 3f) }
                             }
                         }
-                        if (shows.isNotEmpty() && kind != "movie") {
+                        if (shows.isNotEmpty()) {
                             cardRow("shows", "Shows from your provider", nav) {
                                 items(shows, key = { it.id }) { ProviderSeriesCard(vm, it, screenKey) }
                                 item(key = "more") { MoreCard("All shows", { vm.navigate(Screen.Browse(BrowseKind.SHOWS)) }, OD_POSTER_WIDTH, 2f / 3f) }
@@ -204,12 +179,6 @@ fun OnDemandTab(vm: AppViewModel) {
             }
         }
     }
-}
-
-private fun kindMatches(kind: String, p: ResumePoint): Boolean = when (kind) {
-    "movie" -> p.key.startsWith("movie:") || p.key.startsWith("addon:movie:")
-    "series" -> p.key.startsWith("ep:") || (p.key.startsWith("addon:") && !p.key.startsWith("addon:movie:"))
-    else -> true
 }
 
 /** The header for an add-on title. */
@@ -428,7 +397,7 @@ private fun ContinueCard(vm: AppViewModel, point: ResumePoint, screenKey: String
         onLongClick = {
             vm.showDialog(AppDialog(point.title, point.subtitle, actions = listOf(
                 DialogAction("Resume", Icons.Play) { vm.dismissDialog(); vm.playResume(point) },
-                DialogAction("Remove from Continue watching", Icons.Close) { vm.dismissDialog(); vm.removeResume(point.key) },
+                DialogAction("Remove from Continue watching", Icons.Close) { vm.dismissDialog(); vm.removeFromContinueWatching(point.key) },
             )))
         },
         onFocus = { vm.heroFocus = basic },

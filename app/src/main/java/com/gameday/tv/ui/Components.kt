@@ -37,6 +37,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -90,6 +91,7 @@ import com.gameday.tv.data.Channel
 import com.gameday.tv.data.Profile
 import com.gameday.tv.ui.theme.AppColors
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // ---------------------------------------------------------------------------------------------
 // Focusable surfaces and buttons
@@ -398,6 +400,8 @@ fun TvTextField(
             returnFocus = false
         }
     }
+    // Back reaches the back handlers directly (see MainActivity), so it ends editing here.
+    androidx.activity.compose.BackHandler(enabled = editing) { finish(false) }
 
     Column(modifier) {
         if (label != null) {
@@ -739,9 +743,22 @@ fun Modifier.rememberFocus(vm: AppViewModel, screenKey: String, itemKey: String)
     LaunchedEffect(restore) {
         if (restore && requester.requestFocusSafely(80)) vm.restoreFocusFor = null
     }
+    // In a card row: register with the row so coming back to it lands here (see cardRow).
+    val row = LocalRowFocus.current
+    if (row != null) {
+        DisposableEffect(row, itemKey) {
+            row.requesters[itemKey] = requester
+            onDispose { if (row.requesters[itemKey] === requester) row.requesters.remove(itemKey) }
+        }
+    }
     return this
         .focusRequester(requester)
-        .onFocusChanged { if (it.isFocused) vm.focusMemory[screenKey] = itemKey }
+        .onFocusChanged {
+            if (it.isFocused) {
+                vm.focusMemory[screenKey] = itemKey
+                row?.lastKey = itemKey
+            }
+        }
 }
 
 /** Whether focus is somewhere inside a container (see [trackFocus]). */
@@ -771,6 +788,35 @@ fun InitialFocus(vm: AppViewModel, screenKey: String, default: FocusRequester, k
 }
 
 /**
+ * Back on a long list (Sports, Live, On Demand): first it glides back to the top and puts focus on
+ * [top]; once there, Back does what it normally does (another tab, exit).
+ */
+@Composable
+fun BackToTop(state: androidx.compose.foundation.lazy.LazyListState, top: FocusRequester) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val scrolled by remember(state) { androidx.compose.runtime.derivedStateOf { state.firstVisibleItemIndex > 0 } }
+    fun tryFocus(): Boolean = try {
+        top.requestFocus(FocusDirection.Enter)
+    } catch (_: IllegalStateException) {
+        false
+    }
+    androidx.activity.compose.BackHandler(enabled = scrolled) {
+        scope.launch {
+            // Something above the list (filter chips) can take focus right away; a target inside the
+            // list only exists once the list is back at the top.
+            val focusedFirst = tryFocus()
+            state.animateScrollToItem(0)
+            if (!focusedFirst) {
+                repeat(10) {
+                    if (tryFocus()) return@launch
+                    delay(50)
+                }
+            }
+        }
+    }
+}
+
+/**
  * Scrolls a vertical list so the focused row sits near the top (TV "pivot" scrolling), instead of
  * the minimum scroll. Rows inside get the default behavior back via [DefaultScroll].
  */
@@ -782,6 +828,11 @@ fun PivotScroll(offset: Dp, content: @Composable () -> Unit) {
     val spec = remember(px) {
         object : BringIntoViewSpec {
             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = offset - px
+
+            // A long, gentle ease-out instead of the default spring, which started abruptly.
+            @Deprecated("Still read by the scroll container")
+            override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> =
+                tween(durationMillis = 360, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f))
         }
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides spec, LocalDefaultScroll provides default) { content() }

@@ -52,6 +52,7 @@ fun LibraryTab(vm: AppViewModel) {
     if (vm.tabWantsFocus) InitialFocus(vm, screenKey, railFocus)
     val savedMovies = vm.saved.filter { it.isMovie }
     val savedShows = vm.saved.filter { !it.isMovie }
+    val continueWatching = vm.continueWatching
 
     val recordings = vm.recordings
     val done = recordings.filter { it.status == RecStatus.DONE || it.status == RecStatus.RECORDING || it.status == RecStatus.FAILED }
@@ -66,7 +67,7 @@ fun LibraryTab(vm: AppViewModel) {
                     val count = when (s) {
                         LibSection.RECORDINGS -> done.size
                         LibSection.SCHEDULED -> scheduled.size
-                        LibSection.CONTINUE -> vm.resume.size
+                        LibSection.CONTINUE -> continueWatching.size
                         LibSection.TEAMS -> vm.favorites.size
                         LibSection.MOVIES -> savedMovies.size
                         LibSection.SHOWS -> savedShows.size
@@ -95,8 +96,8 @@ fun LibraryTab(vm: AppViewModel) {
                     if (vm.canWakeExactly) null else "Tip: allow GameDay TV to set alarms (Settings › Recordings) so recordings start on time.") {
                     items(scheduled, key = { it.id }) { RecordingCard(vm, it, screenKey) }
                 }
-                LibSection.CONTINUE -> Grid(vm.resume.isEmpty(), "Nothing in progress", "Movies, episodes and recordings you start show up here.") {
-                    items(vm.resume.toList(), key = { it.key }) { ResumeCard(vm, it, screenKey) }
+                LibSection.CONTINUE -> Grid(continueWatching.isEmpty(), "Nothing in progress", "Movies, episodes and recordings you start show up here.") {
+                    items(continueWatching, key = { it.key }) { ResumeCard(vm, it, screenKey) }
                 }
                 LibSection.TEAMS -> Grid(vm.favorites.isEmpty(), "No teams yet", "Add teams from Settings › Sports, or from any game or team page.", minWidth = 150) {
                     items(vm.favorites.toList(), key = { it.key }) { TeamCard(vm, it, screenKey) }

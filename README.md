@@ -14,6 +14,20 @@ A live TV and sports app for Android TV, built around **your IPTV service** and 
   - A **LIVE** button: red while you're watching live; grey when you're behind (paused, rewound, or in catch-up), and pressing it jumps back to live.
   - A **catch-up** button on channels with catch-up: start the current program over, or replay an earlier one from the provider's archive.
   - Back / forward are YouTube TV's circular arrows with the seconds inside (10 and 30). They also work on live streams that have a rewind window.
+- **Restart / Previous episode** in the movie and show player: it restarts what's playing, and in the first 15 seconds of an episode it goes to the previous one.
+- **Episode thumbnails** in the player's Episodes list.
+- **Continue watching shows one card per show** (the episode you watched last). Removing it removes the whole show.
+- **Watch the live preview full screen:** on Sports and Live, move up onto the video playing at the top and press OK. Up from the video goes to the tab you're on.
+- **Video stats** in every player: resolution, frame rate, video and audio codecs, decoder, bitrates, connection speed, buffer and dropped frames. It's a button in the live player and under More in the movie and show player, and in each Multiview screen's menu.
+- **Back to the top:** on Sports, Live and On Demand, Back from further down the page goes back to the top first.
+- **Smoother scrolling:** rows glide up as well as down.
+- **Sports header:** with no game highlighted, it shows the channel playing and what's on (from the guide).
+- **Golf:** a tournament is only in "Live now" while a round is being played (not overnight or once the day's play is complete), and golf channels only show its score bug then. Tournament cards show the tour's logo.
+- **On Demand** no longer has the Movies, Shows and Add-ons chips (add-ons are in Settings › Add-ons).
+- **Fixes:**
+  - Back closes menus, player panels and pages with one press (it used to take two).
+  - Up / Down in a long-press menu stays in the menu instead of jumping to the games and shows behind it, and closing a menu returns to the card it was opened from.
+  - Going back to a row lands on the card you left there, even after the row scrolled off screen (it used to pick whichever card lined up).
 
 ## What's new in 2.3
 

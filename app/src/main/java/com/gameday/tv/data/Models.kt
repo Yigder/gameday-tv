@@ -284,6 +284,8 @@ data class Tournament(
     val broadcasts: List<String>,
     val leaders: List<GolfPlayer>,
     val fieldSize: Int,
+    /** The tour's logo (PGA TOUR, DP World Tour), for the tournament's card. */
+    val logo: String? = null,
 )
 
 // ---------- App accounts ----------
@@ -318,6 +320,26 @@ data class ResumePoint(
     val updatedAt: Long,
 ) {
     val progress: Float get() = if (durationMs <= 0) 0f else (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+}
+
+/**
+ * "Continue watching" shows one card per show: its most recently watched episode. Every episode
+ * keeps its own resume point (for the show's episode list); only the row is combined.
+ */
+object ContinueWatching {
+    /**
+     * What a resume key belongs to: an add-on title ("addon:series:tt123|tt123:1:2" → "addon:series:tt123"),
+     * a provider show ("ep:<seriesId>:<episodeId>:<ext>" → "ep:<seriesId>"), or itself (movies, recordings).
+     */
+    fun groupKey(key: String): String = when {
+        key.startsWith("addon:") -> key.substringBefore('|')
+        key.startsWith("ep:") -> "ep:" + key.removePrefix("ep:").substringBefore(':')
+        else -> key
+    }
+
+    /** The latest point of each show (and every movie), most recent first. */
+    fun latestPerShow(points: List<ResumePoint>): List<ResumePoint> =
+        points.sortedByDescending { it.updatedAt }.distinctBy { groupKey(it.key) }
 }
 
 // ---------- Recordings (DVR) ----------

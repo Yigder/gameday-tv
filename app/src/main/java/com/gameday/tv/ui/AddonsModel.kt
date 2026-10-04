@@ -366,22 +366,37 @@ class AddonsModel(private val vm: AppViewModel) {
         return AddonNext(p.type, p.id, n, p.name, p.background ?: p.poster, bingeGroup)
     }
 
+    /** The episode before [videoId] in [meta] (specials left out), for the player's Previous button. */
+    fun previousEpisode(meta: MetaDetail, videoId: String, bingeGroup: String?): AddonNext? {
+        val list = meta.videos.filter { it.season > 0 }
+        val i = list.indexOfFirst { it.id == videoId }
+        val prev = list.getOrNull(i - 1)?.takeIf { i > 0 } ?: return null
+        val p = meta.preview
+        return AddonNext(p.type, p.id, prev, p.name, p.background ?: p.poster, bingeGroup)
+    }
+
     /** Autoplay: the next episode from the same add-on release group when possible. */
-    fun playNext(next: AddonNext) {
+    fun playNext(next: AddonNext) = playEpisode(next, "Up next", "the next episode", leaveOnFail = true)
+
+    /** The Previous button: the episode keeps playing if the previous one has no source. */
+    fun playPrevious(prev: AddonNext) = playEpisode(prev, "Previous episode", "the previous episode", leaveOnFail = false)
+
+    private fun playEpisode(target: AddonNext, label: String, what: String, leaveOnFail: Boolean) {
         vm.viewModelScope.launch {
-            vm.showMessage("Up next: S${next.video.season} E${next.video.episode} · ${next.video.title}")
-            val meta = meta(next.type, next.metaId) ?: return@launch vm.back()
-            val found = streams(next.type, next.video.id)
-            fun ready(s: AddonStream) = s.url != null || (s.isTorrent && s.infoHash in found.cached)
-            val list = found.streams
-            val pick = list.firstOrNull { next.bingeGroup != null && it.bingeGroup == next.bingeGroup && ready(it) }
+            vm.showMessage("$label: S${target.video.season} E${target.video.episode} · ${target.video.title}")
+            val meta = meta(target.type, target.metaId)
+            val found = meta?.let { streams(target.type, target.video.id) }
+            val cached = found?.cached.orEmpty()
+            fun ready(s: AddonStream) = s.url != null || (s.isTorrent && s.infoHash in cached)
+            val list = found?.streams.orEmpty()
+            val pick = list.firstOrNull { target.bingeGroup != null && it.bingeGroup == target.bingeGroup && ready(it) }
                 ?: list.firstOrNull { ready(it) }
-            if (pick == null) {
-                vm.showMessage("Couldn't find a source for the next episode")
-                vm.back()
+            if (meta == null || pick == null) {
+                vm.showMessage("Couldn't find a source for $what")
+                if (leaveOnFail) vm.back()
                 return@launch
             }
-            play(pick, meta, next.video)
+            play(pick, meta, target.video)
         }
     }
 

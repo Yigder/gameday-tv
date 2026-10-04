@@ -83,6 +83,14 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         KeyActivity.onKey(event)
         if (OkKeyGate.shouldConsume(event)) return true
+        // Compose turns Back into "move focus out of the current group" (FocusDirection.Exit) and
+        // only lets it through when there's no group left to leave, so menus, side panels and rows
+        // took two presses to close. Back goes straight to the back handlers instead. (The on-screen
+        // keyboard still takes Back first: the IME sees it before the activity does.)
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) onBackPressedDispatcher.onBackPressed()
+            return true
+        }
         return super.dispatchKeyEvent(event)
     }
 }
@@ -99,7 +107,7 @@ private fun GameDayApp(vm: AppViewModel = viewModel()) {
     WatchStalls(main)
     LaunchedEffect(screen) { vm.onScreenChanged(screen) }
 
-    BackHandler(enabled = vm.dialog != null) { vm.dismissDialog() }
+    // (A menu's own Back handler is in DialogHost, so it wins over the screen's handlers.)
     BackHandler(enabled = vm.dialog == null && vm.canGoBack) { vm.back() }
 
     Box(Modifier.fillMaxSize()) {

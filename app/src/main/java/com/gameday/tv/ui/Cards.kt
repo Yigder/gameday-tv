@@ -1,7 +1,16 @@
 package com.gameday.tv.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
 import androidx.compose.animation.fadeIn
@@ -138,7 +147,10 @@ fun MediaCard(
 }
 
 /** Lets rows of a vertical list move Up to the previous row even when it has scrolled out of view. */
-class RowNav(val state: LazyListState, val scope: CoroutineScope)
+class RowNav(val state: LazyListState, val scope: CoroutineScope) {
+    /** An Up glide is running (extra presses during it are dropped). */
+    var movingUp = false
+}
 
 @Composable
 fun rememberRowNav(state: LazyListState): RowNav {
@@ -148,7 +160,8 @@ fun rememberRowNav(state: LazyListState): RowNav {
 
 /**
  * Without this, Up from a row whose previous row is off screen would jump to whatever is visible
- * above the list (the top bar, filter chips) instead of the previous row.
+ * above the list (the top bar, filter chips) instead of the previous row. The list glides up (like
+ * it does going down) and focus moves as soon as the previous row is on screen.
  */
 @Composable
 private fun Modifier.upToPreviousRow(nav: RowNav?, key: String): Modifier {
@@ -157,34 +170,82 @@ private fun Modifier.upToPreviousRow(nav: RowNav?, key: String): Modifier {
     return onPreviewKeyEvent { ev ->
         if (ev.type != KeyEventType.KeyDown || ev.key != Key.DirectionUp) return@onPreviewKeyEvent false
         val visible = nav.state.layoutInfo.visibleItemsInfo
-        val idx = visible.firstOrNull { it.key == key }?.index ?: return@onPreviewKeyEvent false
+        val here = visible.firstOrNull { it.key == key } ?: return@onPreviewKeyEvent false
+        val idx = here.index
         if (idx == 0) return@onPreviewKeyEvent false
         val prev = visible.firstOrNull { it.index == idx - 1 }
         if (prev != null && prev.offset >= 0) return@onPreviewKeyEvent false
+        // Already gliding up from an earlier press: let that one finish.
+        if (nav.movingUp) return@onPreviewKeyEvent true
+        nav.movingUp = true
         nav.scope.launch {
-            nav.state.scrollToItem(idx - 1)
-            focusManager.moveFocus(FocusDirection.Up)
+            try {
+                // Scroll by about a row; once the previous row's cards exist, focus moves there and
+                // the list's own (pivot) scrolling takes over and settles it in place.
+                val glide = launch { nav.state.animateScrollBy(-(prev?.size ?: here.size).toFloat(), ROW_GLIDE) }
+                snapshotFlow { nav.state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx - 1 }?.let { it.offset + it.size > 0 } == true }
+                    .first { it }
+                focusManager.moveFocus(FocusDirection.Up)
+                glide.cancel()
+            } finally {
+                nav.movingUp = false
+            }
         }
         true
     }
 }
 
+/** How the list glides to the previous row (the same feel as [PivotScroll]'s scrolling). */
+private val ROW_GLIDE = tween<Float>(durationMillis = 320, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f))
+
+/**
+ * Which card a row last had focused. Kept in the row's saved state, so it survives the row
+ * scrolling out of the list and coming back (the list throws away rows that are off screen).
+ */
+class RowFocusMemory(private val last: androidx.compose.runtime.MutableState<String?>) {
+    val requesters = HashMap<String, FocusRequester>()
+    var lastKey: String?
+        get() = last.value
+        set(v) {
+            last.value = v
+        }
+}
+
+/** The row a card is in, for [rememberFocus]. */
+val LocalRowFocus = androidx.compose.runtime.compositionLocalOf<RowFocusMemory?> { null }
+
 /**
  * A titled horizontal row of cards. Coming back to the row (Up/Down) lands on the card last
- * focused in it, not whichever card happens to line up.
+ * focused in it, not whichever card happens to line up — even after the row was scrolled away.
  */
-@OptIn(ExperimentalComposeUiApi::class)
 fun LazyListScope.cardRow(key: String, title: String, nav: RowNav? = null, content: LazyListScope.() -> Unit) {
     item(key = key) {
-        Column(Modifier.upToPreviousRow(nav, key).padding(bottom = 18.dp)) {
-            SectionTitle(title, Modifier.padding(start = 48.dp, bottom = 10.dp))
-            DefaultScroll {
-                LazyRow(
-                    modifier = Modifier.focusRestorer(),
-                    contentPadding = PaddingValues(horizontal = 48.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    content = content,
-                )
+        val saved = rememberSaveable { mutableStateOf<String?>(null) }
+        val memory = remember(saved) { RowFocusMemory(saved) }
+        CompositionLocalProvider(LocalRowFocus provides memory) {
+            Column(Modifier.upToPreviousRow(nav, key).padding(bottom = 18.dp)) {
+                SectionTitle(title, Modifier.padding(start = 48.dp, bottom = 10.dp))
+                DefaultScroll {
+                    LazyRow(
+                        modifier = Modifier
+                            .focusProperties {
+                                onEnter = {
+                                    val target = memory.lastKey?.let { memory.requesters[it] }
+                                    if (target != null) {
+                                        try {
+                                            target.requestFocus()
+                                        } catch (_: IllegalStateException) {
+                                            // Not attached: the nearest card takes focus as usual.
+                                        }
+                                    }
+                                }
+                            }
+                            .focusGroup(),
+                        contentPadding = PaddingValues(horizontal = 48.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        content = content,
+                    )
+                }
             }
         }
     }
@@ -261,8 +322,20 @@ fun GameThumb(game: Game, hideScores: Boolean, recording: Boolean = false) {
 
 @Composable
 fun TournamentThumb(t: Tournament, hideScores: Boolean) {
-    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF1B5E20), Color(0xFF0B3D10))))) {
-        Column(Modifier.align(Alignment.CenterStart).padding(start = 12.dp, end = 12.dp)) {
+    var logoFailed by remember(t.logo) { mutableStateOf(false) }
+    val logo = t.logo?.takeIf { !logoFailed }
+    // The tour's logo (PGA TOUR, DP World Tour) on the right, the tournament on the left; plain
+    // green only when there's no logo.
+    val background = if (logo != null) Brush.linearGradient(listOf(Color(0xFF26313F), Color(0xFF111821)))
+    else Brush.linearGradient(listOf(Color(0xFF1B5E20), Color(0xFF0B3D10)))
+    Box(Modifier.fillMaxSize().background(background)) {
+        if (logo != null) {
+            // Above the broadcaster tag in the bottom corner.
+            Box(Modifier.align(Alignment.TopEnd).fillMaxWidth(0.36f).fillMaxHeight(0.78f).padding(top = 10.dp, end = 10.dp)) {
+                AsyncImage(logo, t.tour.label, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, onError = { logoFailed = true })
+            }
+        }
+        Column(Modifier.align(Alignment.CenterStart).fillMaxWidth(if (logo != null) 0.64f else 1f).padding(start = 12.dp, end = 4.dp)) {
             Text(t.tour.label.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xCCFFFFFF))
             Text(t.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (!hideScores) {

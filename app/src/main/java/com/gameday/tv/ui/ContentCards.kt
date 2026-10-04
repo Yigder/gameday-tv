@@ -153,7 +153,7 @@ fun ResumeCard(vm: AppViewModel, point: ResumePoint, screenKey: String, onHero: 
         onLongClick = {
             vm.showDialog(AppDialog(point.title, point.subtitle, actions = listOf(
                 DialogAction("Resume", Icons.Play) { vm.dismissDialog(); vm.playResume(point) },
-                DialogAction("Remove from Continue watching", Icons.Close) { vm.dismissDialog(); vm.removeResume(point.key) },
+                DialogAction("Remove from Continue watching", Icons.Close) { vm.dismissDialog(); vm.removeFromContinueWatching(point.key) },
             )))
         },
         onFocus = { onHero(HeroInfo(point.title, listOf(point.subtitle, "${durationText(point.durationMs - point.positionMs)} left"), image = point.image, progress = point.progress)) },
