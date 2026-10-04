@@ -44,6 +44,18 @@ object Leagues {
     val everything = all + golf
 
     fun byKey(key: String): League? = everything.firstOrNull { it.key == key }
+
+    const val GOLF = "golf"
+
+    /** What the viewer picks in the UI: each team league, and one "Golf" covering every tour. */
+    val picks: List<SportPick> = all.map { SportPick(it.key, it.label, it.sport, listOf(it)) } +
+        SportPick(GOLF, "Golf", "golf", golf)
+
+    fun pick(key: String): SportPick? = picks.firstOrNull { it.key == key }
+}
+
+data class SportPick(val key: String, val label: String, val sport: String, val leagues: List<League>) {
+    val leagueKeys: Set<String> get() = leagues.mapTo(HashSet()) { it.key }
 }
 
 /** Live scores from ESPN's public scoreboard feeds (no API key required). */

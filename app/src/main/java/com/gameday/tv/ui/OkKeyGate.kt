@@ -40,3 +40,28 @@ object OkKeyGate {
         code == KeyEvent.KEYCODE_NUMPAD_ENTER ||
         code == KeyEvent.KEYCODE_BUTTON_A
 }
+
+/**
+ * When the viewer last pressed a D-pad direction. Tells focus the viewer moved (open the tab they
+ * landed on) apart from focus Android moved by itself after the focused item disappeared (don't).
+ */
+object KeyActivity {
+    @Volatile
+    private var lastDirectionAt = 0L
+
+    /** Any button, so screens know whether the viewer has started using them. */
+    @Volatile
+    var lastKeyAt = 0L
+        private set
+
+    fun onKey(event: KeyEvent) {
+        if (event.action != KeyEvent.ACTION_DOWN) return
+        lastKeyAt = android.os.SystemClock.uptimeMillis()
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT ->
+                lastDirectionAt = android.os.SystemClock.uptimeMillis()
+        }
+    }
+
+    fun movedRecently(withinMs: Long = 500): Boolean = android.os.SystemClock.uptimeMillis() - lastDirectionAt < withinMs
+}

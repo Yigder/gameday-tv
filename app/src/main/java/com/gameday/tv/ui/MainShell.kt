@@ -2,12 +2,16 @@ package com.gameday.tv.ui
 
 import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,9 +28,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
@@ -35,6 +40,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Border
@@ -42,10 +48,23 @@ import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
+import com.gameday.tv.data.GameState
 import com.gameday.tv.ui.theme.AppColors
 import kotlinx.coroutines.delay
 
-/** Home / Sports / Live / Library with the YouTube TV-style top bar. */
+/** Where live video plays behind a tab: the top-right corner, fading into the page. */
+private data class VideoFrame(val widthFraction: Float, val height: Dp)
+
+private fun videoFrameFor(tab: Tab): VideoFrame? = when (tab) {
+    // Down to where the first row (or the filter chips) begins.
+    Tab.HOME -> VideoFrame(0.6f, 268.dp)
+    Tab.SPORTS -> VideoFrame(0.6f, 250.dp)
+    Tab.LIVE -> VideoFrame(0.42f, 214.dp)
+    // On Demand shows each title's art, and the library has no header.
+    Tab.ON_DEMAND, Tab.LIBRARY -> null
+}
+
+/** Home / Sports / Live / On Demand / Library with the YouTube TV-style top bar. */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
@@ -73,12 +92,17 @@ fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
         }
     }
 
+    PreviewDirector(vm, tab)
+
     Box(Modifier.fillMaxSize().trackFocus(shellFocus)) {
+        videoFrameFor(tab)?.let { BackgroundVideo(vm, it) }
+
         stateHolder.SaveableStateProvider("main:$tab") {
             when (tab) {
                 Tab.HOME -> HomeTab(vm)
                 Tab.SPORTS -> SportsTab(vm)
                 Tab.LIVE -> LiveTab(vm)
+                Tab.ON_DEMAND -> OnDemandTab(vm)
                 Tab.LIBRARY -> LibraryTab(vm)
             }
         }
@@ -94,7 +118,8 @@ fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
             Logo(18.dp)
             Spacer(Modifier.width(28.dp))
             Row(
-                Modifier.focusRestorer(tabFocus.getValue(tab)),
+                // Up from the page lands on the open tab, not whichever tab lines up.
+                Modifier.focusRestorer(tabFocus.getValue(tab)).focusGroup(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Tab.entries.forEach { t ->
@@ -108,7 +133,7 @@ fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
                 }
             }
             Spacer(Modifier.weight(1f))
-            TopIconButton(Icons.Search, "Search") { vm.navigate(Screen.Search) }
+            TopIconButton(Icons.Search, "Search") { vm.navigate(if (vm.tab == Tab.ON_DEMAND) Screen.OnDemandSearch else Screen.Search) }
             Spacer(Modifier.width(10.dp))
             TopIconButton(Icons.Settings, "Settings") { vm.openSettings() }
             Spacer(Modifier.width(10.dp))
@@ -117,19 +142,72 @@ fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
     }
 }
 
+/**
+ * Picks what plays behind the menus: the live channel or game the viewer rests on, otherwise
+ * whatever was playing, otherwise the most recent channel.
+ */
+@Composable
+private fun PreviewDirector(vm: AppViewModel, tab: Tab) {
+    val hero = vm.heroFocus
+    LaunchedEffect(hero, tab, vm.backgroundVideo, vm.catalog != null) {
+        if (vm.backgroundVideo == "off" || videoFrameFor(tab) == null || vm.catalog == null) return@LaunchedEffect
+        // Rest on a card for a moment before switching, so scrolling past doesn't change channels.
+        delay(if (hero == null) 1_500L else 1_300L)
+        val target = when {
+            hero?.channel != null -> hero.channel
+            hero?.game != null && hero.game.state == GameState.LIVE -> vm.matchChannels(hero.game).firstOrNull()?.channel
+            hero?.tournament != null && hero.tournament.roundInProgress -> vm.matchChannels(hero.tournament).firstOrNull()?.channel
+            else -> null
+        }
+        val justWatched = System.currentTimeMillis() < vm.keepBackgroundUntil && vm.backgroundChannel != null
+        when {
+            target != null && !justWatched -> if (vm.backgroundChannel?.id != target.id) vm.previewChannel(target)
+            vm.backgroundChannel != null -> if (vm.mainStream.currentKey == null) vm.previewChannel(vm.backgroundChannel!!)
+            else -> vm.recentChannels.firstOrNull()?.let { vm.previewChannel(it) }
+        }
+    }
+}
+
+@Composable
+private fun BackgroundVideo(vm: AppViewModel, frame: VideoFrame) {
+    val channel = vm.backgroundChannel ?: return
+    if (vm.backgroundVideo == "off") return
+    val stream = vm.mainStream
+    // Fade in once there's a picture (no black box while it connects).
+    val showing = stream.currentKey == channel.id && !stream.buffering && stream.error == null
+    val alpha by animateFloatAsState(if (showing) 1f else 0f, tween(450), label = "bgVideo")
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
+        Box(Modifier.fillMaxWidth(frame.widthFraction).height(frame.height).alpha(alpha)) {
+            BackgroundVideoSurface(stream, Modifier.fillMaxSize())
+            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to AppColors.Background, 0.3f to Color(0x800F0F0F), 0.6f to Color.Transparent)))
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color(0x990F0F0F), 0.25f to Color.Transparent, 0.7f to Color.Transparent, 1f to AppColors.Background)))
+            Row(Modifier.align(Alignment.BottomEnd).padding(end = 40.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                LiveBadge(small = true)
+                Spacer(Modifier.width(6.dp))
+                Text(cleanChannelName(channel.name), fontSize = 12.sp, color = AppColors.Text, maxLines = 1)
+            }
+        }
+    }
+}
+
 @Composable
 private fun TabButton(label: String, selected: Boolean, onFocused: () -> Unit, onClick: () -> Unit, modifier: Modifier) {
     var focused by remember { mutableStateOf(false) }
-    // Like YouTube TV, resting on a tab opens it.
-    LaunchedEffect(focused) {
-        if (focused && !selected) {
+    var byViewer by remember { mutableStateOf(false) }
+    // Like YouTube TV, resting on a tab opens it — but only when the viewer moved there. When a
+    // menu closes and Android parks focus on the first tab, that mustn't switch to Home.
+    LaunchedEffect(focused, byViewer) {
+        if (focused && byViewer && !selected) {
             delay(350)
             onFocused()
         }
     }
     Surface(
         onClick = onClick,
-        modifier = modifier.onFocusChanged { focused = it.isFocused },
+        modifier = modifier.onFocusChanged {
+            focused = it.isFocused
+            byViewer = it.isFocused && KeyActivity.movedRecently()
+        },
         shape = ClickableSurfaceDefaults.shape(shape = RoundedCornerShape(50)),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = Color.Transparent,

@@ -55,4 +55,38 @@ object DecoderBudget {
     fun reset() {
         prefs?.edit()?.remove(KEY_LIMIT)?.apply()
     }
+
+    /** The decoding choice for one stream position ([DecoderSlot]), saved for this device. */
+    fun mode(slot: String): DecoderMode =
+        prefs?.getString("decoder_$slot", null)?.let { name -> DecoderMode.entries.firstOrNull { it.name == name } } ?: DecoderMode.AUTO
+
+    fun setMode(slot: String, mode: DecoderMode) {
+        prefs?.edit()?.putString("decoder_$slot", mode.name)?.apply()
+    }
+}
+
+/** How one stream decodes its video. */
+enum class DecoderMode(val label: String) {
+    /** Hardware while this TV has a free decoder (see [DecoderBudget]), software after that. */
+    AUTO("Automatic"),
+    /** Always hardware, ignoring the learned limit. Drops to software only if the hardware decoder fails. */
+    HARDWARE("Hardware"),
+    /** Always on the CPU: leaves the hardware decoders to other streams. */
+    SOFTWARE("Software");
+
+    fun next(): DecoderMode = entries[(ordinal + 1) % entries.size]
+}
+
+/** What a playing stream is actually doing, for menus. */
+fun decodingStatus(mode: DecoderMode, software: Boolean): String = when {
+    mode == DecoderMode.SOFTWARE -> "Decoding on the CPU, which leaves the hardware decoders for other streams"
+    software && mode == DecoderMode.HARDWARE -> "Using software for now: the hardware decoder failed"
+    software -> "Using software for now: this TV's hardware decoders are busy"
+    else -> "Using a hardware decoder"
+}
+
+/** Stream positions that each keep their own [DecoderMode]. */
+object DecoderSlot {
+    const val PLAYER = "player"
+    fun multiview(slot: Int) = "mv$slot"
 }

@@ -30,7 +30,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import com.gameday.tv.data.RecStatus
-import com.gameday.tv.data.SavedKind
 import com.gameday.tv.ui.theme.AppColors
 
 private enum class LibSection(val label: String) {
@@ -49,7 +48,10 @@ fun LibraryTab(vm: AppViewModel) {
     val screenKey = "main:${Tab.LIBRARY}"
     var section by rememberSaveable { mutableStateOf(LibSection.RECORDINGS) }
     val railFocus = remember { FocusRequester() }
+    val selectedRail = remember { FocusRequester() }
     if (vm.tabWantsFocus) InitialFocus(vm, screenKey, railFocus)
+    val savedMovies = vm.saved.filter { it.isMovie }
+    val savedShows = vm.saved.filter { !it.isMovie }
 
     val recordings = vm.recordings
     val done = recordings.filter { it.status == RecStatus.DONE || it.status == RecStatus.RECORDING || it.status == RecStatus.FAILED }
@@ -59,23 +61,27 @@ fun LibraryTab(vm: AppViewModel) {
     Row(Modifier.fillMaxSize().padding(top = 72.dp)) {
         Column(Modifier.width(250.dp).fillMaxHeight().padding(start = 40.dp, end = 12.dp)) {
             Text("Library", fontSize = 26.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 16.dp, bottom = 12.dp))
-            LibSection.entries.forEachIndexed { i, s ->
-                val count = when (s) {
-                    LibSection.RECORDINGS -> done.size
-                    LibSection.SCHEDULED -> scheduled.size
-                    LibSection.CONTINUE -> vm.resume.size
-                    LibSection.TEAMS -> vm.favorites.size
-                    LibSection.MOVIES -> vm.saved.count { it.kind == SavedKind.MOVIE }
-                    LibSection.SHOWS -> vm.saved.count { it.kind == SavedKind.SERIES }
-                    LibSection.CHANNELS -> vm.favoriteChannelIds.size
+            Column(Modifier.returnFocusTo(selectedRail)) {
+                LibSection.entries.forEachIndexed { i, s ->
+                    val count = when (s) {
+                        LibSection.RECORDINGS -> done.size
+                        LibSection.SCHEDULED -> scheduled.size
+                        LibSection.CONTINUE -> vm.resume.size
+                        LibSection.TEAMS -> vm.favorites.size
+                        LibSection.MOVIES -> savedMovies.size
+                        LibSection.SHOWS -> savedShows.size
+                        LibSection.CHANNELS -> vm.favoriteChannelIds.size
+                    }
+                    RailItem(
+                        label = s.label,
+                        count = count,
+                        selected = s == section,
+                        onSelect = { section = s },
+                        modifier = Modifier
+                            .then(if (i == 0) Modifier.focusRequester(railFocus) else Modifier)
+                            .then(if (s == section) Modifier.focusRequester(selectedRail) else Modifier),
+                    )
                 }
-                RailItem(
-                    label = s.label,
-                    count = count,
-                    selected = s == section,
-                    onSelect = { section = s },
-                    modifier = if (i == 0) Modifier.focusRequester(railFocus) else Modifier,
-                )
             }
         }
         Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -95,11 +101,11 @@ fun LibraryTab(vm: AppViewModel) {
                 LibSection.TEAMS -> Grid(vm.favorites.isEmpty(), "No teams yet", "Add teams from Settings › Sports, or from any game or team page.", minWidth = 150) {
                     items(vm.favorites.toList(), key = { it.key }) { TeamCard(vm, it, screenKey) }
                 }
-                LibSection.MOVIES -> Grid(vm.saved.none { it.kind == SavedKind.MOVIE }, "No saved movies", "Choose \"Add to library\" on any movie.", minWidth = POSTER_WIDTH) {
-                    items(vm.saved.filter { it.kind == SavedKind.MOVIE }, key = { it.key }) { SavedCard(vm, it, screenKey) }
+                LibSection.MOVIES -> Grid(savedMovies.isEmpty(), "No saved movies", "Choose \"Add to library\" on any movie.", minWidth = POSTER_WIDTH) {
+                    items(savedMovies, key = { it.key }) { SavedCard(vm, it, screenKey) }
                 }
-                LibSection.SHOWS -> Grid(vm.saved.none { it.kind == SavedKind.SERIES }, "No saved shows", "Choose \"Add to library\" on any show.", minWidth = POSTER_WIDTH) {
-                    items(vm.saved.filter { it.kind == SavedKind.SERIES }, key = { it.key }) { SavedCard(vm, it, screenKey) }
+                LibSection.SHOWS -> Grid(savedShows.isEmpty(), "No saved shows", "Choose \"Add to library\" on any show.", minWidth = POSTER_WIDTH) {
+                    items(savedShows, key = { it.key }) { SavedCard(vm, it, screenKey) }
                 }
                 LibSection.CHANNELS -> {
                     val channels = vm.favoriteChannels

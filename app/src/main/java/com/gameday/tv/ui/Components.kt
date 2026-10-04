@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,9 +45,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -103,7 +108,7 @@ fun FocusSurface(
 ) {
     Surface(
         onClick = onClick,
-        onLongClick = onLongClick,
+        onLongClick = onLongClick.swallowingRelease(),
         modifier = modifier,
         shape = ClickableSurfaceDefaults.shape(shape = shape),
         colors = ClickableSurfaceDefaults.colors(
@@ -122,6 +127,18 @@ fun FocusSurface(
     )
 }
 
+/**
+ * A long-press handler that also drops the rest of the held OK press. Long presses open menus while
+ * OK is still down; without this the key repeats and release land on the menu's first option
+ * ("Watch") and pick it, closing the menu before anything can be chosen.
+ */
+fun (() -> Unit)?.swallowingRelease(): (() -> Unit)? = this?.let { action ->
+    {
+        OkKeyGate.swallowRelease()
+        action()
+    }
+}
+
 /** Rounded button: translucent when idle, white with black text when focused (YouTube TV style). */
 @Composable
 fun PillButton(
@@ -136,7 +153,7 @@ fun PillButton(
     val shape = RoundedCornerShape(50)
     Surface(
         onClick = onClick,
-        onLongClick = onLongClick,
+        onLongClick = onLongClick.swallowingRelease(),
         enabled = enabled,
         modifier = modifier,
         shape = ClickableSurfaceDefaults.shape(shape = shape),
@@ -165,6 +182,16 @@ fun PillButton(
     }
 }
 
+/** Size of the player's round buttons (Settings › Playback › Player buttons). */
+val LocalButtonSize = androidx.compose.runtime.compositionLocalOf { 46.dp }
+
+/** (button, play button) sizes for "small", "medium" or "large". */
+fun playerButtonSizes(setting: String): Pair<Dp, Dp> = when (setting) {
+    "small" -> 38.dp to 44.dp
+    "large" -> 52.dp to 60.dp
+    else -> 44.dp to 52.dp
+}
+
 /** Round icon button with its label shown underneath while focused (player controls). */
 @Composable
 fun IconCircleButton(
@@ -172,12 +199,13 @@ fun IconCircleButton(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: Dp = 52.dp,
+    size: Dp = LocalButtonSize.current,
     active: Boolean = false,
     tint: Color? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(size + 44.dp)) {
+    // Narrow columns keep the row compact; the focused label may spill past its column.
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(size + 22.dp)) {
         Surface(
             onClick = onClick,
             modifier = modifier.size(size).onFocusChanged { focused = it.isFocused },
@@ -196,13 +224,15 @@ fun IconCircleButton(
                 Icon(icon, contentDescription = label, modifier = Modifier.size(size * 0.48f))
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(5.dp))
         Text(
             label,
-            fontSize = 12.sp,
+            fontSize = if (size < 42.dp) 11.sp else 12.sp,
             color = if (focused) AppColors.Text else Color.Transparent,
             maxLines = 1,
+            softWrap = false,
             textAlign = TextAlign.Center,
+            modifier = Modifier.wrapContentWidth(unbounded = true),
         )
     }
 }
@@ -436,6 +466,8 @@ fun OnScreenKeyboard(
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
     firstKey: FocusRequester? = null,
+    /** Shows a full-width Search (Enter) key. */
+    onEnter: (() -> Unit)? = null,
 ) {
     val rows = listOf("abcdef", "ghijkl", "mnopqr", "stuvwx", "yz1234", "567890")
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -455,28 +487,36 @@ fun OnScreenKeyboard(
             KeyCap("", onBackspace, Modifier.width(76.dp), icon = Icons.Backspace)
             KeyCap("Clear", onClear, Modifier.width(76.dp))
         }
+        if (onEnter != null) KeyCap("Search", onEnter, Modifier.width(282.dp), icon = Icons.Search, primary = true)
     }
 }
 
 @Composable
-private fun KeyCap(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: ImageVector? = null) {
+private fun KeyCap(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: ImageVector? = null, primary: Boolean = false) {
     Surface(
         onClick = onClick,
         modifier = modifier.height(36.dp).then(if (label.length == 1) Modifier.width(36.dp) else Modifier),
         shape = ClickableSurfaceDefaults.shape(shape = RoundedCornerShape(6.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color(0x1AFFFFFF),
+            containerColor = if (primary) Color(0x40FFFFFF) else Color(0x1AFFFFFF),
             contentColor = AppColors.Text,
             focusedContainerColor = Color.White,
             focusedContentColor = Color.Black,
             pressedContainerColor = Color(0xFFDDDDDD),
             pressedContentColor = Color.Black,
         ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.1f),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = if (primary) 1.04f else 1.1f),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (icon != null) Icon(icon, label, Modifier.size(20.dp))
-            else Text(label, fontSize = if (label.length == 1) 17.sp else 13.sp, fontWeight = FontWeight.Medium)
+            when {
+                icon != null && primary -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+                icon != null -> Icon(icon, label, Modifier.size(20.dp))
+                else -> Text(label, fontSize = if (label.length == 1) 17.sp else 13.sp, fontWeight = FontWeight.Medium)
+            }
         }
     }
 }
@@ -734,6 +774,30 @@ fun DefaultScroll(content: @Composable () -> Unit) {
     val d = LocalDefaultScroll.current
     if (d == null) content() else CompositionLocalProvider(LocalBringIntoViewSpec provides d) { content() }
 }
+
+/**
+ * Keeps D-pad focus inside this container (side sheets drawn over a page). Only arrow moves are
+ * stopped: a dialog opened on top can still take focus.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+fun Modifier.trapFocus(): Modifier = this
+    .focusProperties {
+        onExit = {
+            when (requestedFocusDirection) {
+                FocusDirection.Left, FocusDirection.Right, FocusDirection.Up, FocusDirection.Down,
+                FocusDirection.Next, FocusDirection.Previous -> cancelFocusChange()
+                else -> Unit
+            }
+        }
+    }
+    .focusGroup()
+
+/**
+ * A column of choices (settings sections, library shelves) that, when focus comes back from the
+ * page next to it, returns to the chosen item instead of whichever item lines up.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+fun Modifier.returnFocusTo(selected: FocusRequester): Modifier = this.focusRestorer(selected).focusGroup()
 
 /** 16:9 box for thumbnails. */
 fun Modifier.thumb(width: Dp): Modifier = this.width(width).aspectRatio(16f / 9f)

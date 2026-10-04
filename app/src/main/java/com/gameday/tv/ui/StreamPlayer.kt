@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -27,6 +28,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
+import androidx.media3.common.text.Cue
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -46,16 +50,22 @@ import kotlinx.coroutines.delay
  * behind the live window. Used by the full-screen player and by every multiview tile.
  */
 @Stable
+@OptIn(UnstableApi::class)
 class StreamController(context: Context, handleAudioFocus: Boolean) {
     /** Decode video on the CPU: set when this device is out of hardware decoders (see [DecoderBudget]). */
     @Volatile
     private var preferSoftware = false
     private var forcedSoftware = false
 
-    val player: ExoPlayer = buildPlayer(context, handleAudioFocus) { preferSoftware }
+    private val dataSource = OkHttpDataSource.Factory(Http.client)
+
+    val player: ExoPlayer = buildPlayer(context, dataSource, handleAudioFocus) { preferSoftware }
 
     /** True while this stream is decoding in software. */
     var softwareDecoding by mutableStateOf(false); private set
+
+    /** Hardware, software, or automatic: chosen per stream in Settings › Playback or the stream's menu. */
+    var decoderMode by mutableStateOf(DecoderMode.AUTO); private set
 
     var buffering by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
@@ -66,12 +76,20 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
     var reconnecting by mutableStateOf(false); private set
     /** A movie, episode or recording reached its end. */
     var ended by mutableStateOf(false); private set
+    /** The stream's audio, video and caption tracks. */
+    var tracks by mutableStateOf(Tracks.EMPTY); private set
+    /** Captions from the stream itself, drawn by [SubtitleOverlay] in the viewer's style. */
+    var cues by mutableStateOf<List<Cue>>(emptyList()); private set
 
     /** Where to start (or resume after a dropped connection) for seekable video. */
     private var startAt = 0L
 
     private var key: String? = null
     private var candidates: List<String> = emptyList()
+    private var headers: Map<String, String> = emptyMap()
+
+    /** What's loaded (a channel id, a resume key…), or null when stopped. */
+    val currentKey: String? get() = key
     private var playedOk = false
     private var reconnects = 0
     private val handler = Handler(Looper.getMainLooper())
@@ -92,6 +110,14 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
                 }
             }
 
+            override fun onTracksChanged(t: Tracks) {
+                tracks = t
+            }
+
+            override fun onCues(cueGroup: CueGroup) {
+                cues = cueGroup.cues
+            }
+
             override fun onPlayerError(e: PlaybackException) {
                 when {
                     e.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
@@ -100,8 +126,10 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
                     }
                     isDecoderError(e) && !preferSoftware -> {
                         // Another stream took this one's hardware decoder. Don't take it back (that
-                        // would kill the other stream); remember the limit and continue in software.
-                        DecoderBudget.learnFromFailure(this@StreamController)
+                        // would kill the other stream); continue in software. In Automatic mode,
+                        // also remember the limit; a stream forced to hardware says nothing about it.
+                        if (decoderMode == DecoderMode.AUTO) DecoderBudget.learnFromFailure(this@StreamController)
+                        else DecoderBudget.release(this@StreamController)
                         forcedSoftware = true
                         start()
                     }
@@ -109,7 +137,11 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
                         reconnecting = false
                         player.stop()
                         buffering = false
-                        error = "This TV can't decode another video right now. Try a layout with fewer screens."
+                        error = if (decoderMode == DecoderMode.SOFTWARE) {
+                            "Software decoding can't play this stream. Set this screen's video decoding to Hardware or Automatic."
+                        } else {
+                            "This TV can't decode another video right now. Try a layout with fewer screens."
+                        }
                     }
                     else -> fallback(describe(e))
                 }
@@ -117,14 +149,30 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         })
     }
 
-    /** Starts [urls] unless this exact stream is already loaded. [startPositionMs] resumes seekable video. */
-    fun load(key: String, urls: List<String>, startPositionMs: Long = 0) {
-        if (key == this.key && urls == candidates) return
+    /**
+     * Starts [urls] unless this exact stream is already playing (so moving between the menus and the
+     * full-screen player doesn't interrupt it). [startPositionMs] resumes seekable video.
+     */
+    fun load(key: String, urls: List<String>, startPositionMs: Long = 0, headers: Map<String, String> = emptyMap()) {
+        val running = player.playbackState != Player.STATE_IDLE && !ended && error == null
+        if (key == this.key && urls == candidates && running) return
         this.key = key
         candidates = urls
+        this.headers = headers
         startAt = startPositionMs.coerceAtLeast(0)
         ended = false
         attempt = 0
+        resetReconnects()
+        start()
+    }
+
+    /** Switches decoding; a playing stream restarts (from the same spot when seekable) to pick new codecs. */
+    fun applyDecoderMode(mode: DecoderMode) {
+        if (mode == decoderMode) return
+        decoderMode = mode
+        forcedSoftware = false
+        if (key == null) return
+        if (seekable) startAt = player.currentPosition
         resetReconnects()
         start()
     }
@@ -189,6 +237,21 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         DecoderBudget.release(this)
     }
 
+    /** Stops and forgets the stream: frees the provider connection and the decoder. */
+    fun stop() {
+        handler.removeCallbacks(reconnectRunnable)
+        player.stop()
+        player.clearMediaItems()
+        DecoderBudget.release(this)
+        key = null
+        candidates = emptyList()
+        error = null
+        buffering = false
+        reconnecting = false
+        ended = false
+        cues = emptyList()
+    }
+
     fun onAppStarted() {
         if (player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0 && error == null) start()
     }
@@ -208,13 +271,20 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
             error = "This channel has no stream address."
             return
         }
-        // Claim a hardware decoder if the device has one free; otherwise decode in software.
+        // Claim a hardware decoder if the device has one free (or this stream insists on one);
+        // otherwise decode in software.
         DecoderBudget.release(this)
-        preferSoftware = forcedSoftware || !DecoderBudget.canUseHardware()
+        preferSoftware = when (decoderMode) {
+            DecoderMode.SOFTWARE -> true
+            DecoderMode.HARDWARE -> forcedSoftware
+            DecoderMode.AUTO -> forcedSoftware || !DecoderBudget.canUseHardware()
+        }
         if (!preferSoftware) DecoderBudget.acquire(this)
         softwareDecoding = preferSoftware
         buffering = true
+        cues = emptyList()
         loadToken++
+        dataSource.setDefaultRequestProperties(headers)
         player.stop() // codecs are chosen at prepare time, so start clean
         if (startAt > 0) player.setMediaItem(mediaItemFor(url), startAt) else player.setMediaItem(mediaItemFor(url))
         player.prepare()
@@ -270,14 +340,36 @@ fun rememberStreamController(handleAudioFocus: Boolean = true): StreamController
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Stalled streams are common with IPTV: give up after 25s and try the alternate format.
-    LaunchedEffect(controller.buffering, controller.loadToken) {
+    WatchStalls(controller)
+    return controller
+}
+
+/** Stalled streams are common with IPTV: give up after 25s and try the alternate format. */
+@Composable
+fun WatchStalls(controller: StreamController) {
+    LaunchedEffect(controller, controller.buffering, controller.loadToken) {
         if (controller.buffering) {
             delay(25_000)
             controller.onStalled()
         }
     }
-    return controller
+}
+
+/** Pauses the shared player while the app is in the background (frees the IPTV connection). */
+@Composable
+fun FollowAppLifecycle(controller: StreamController) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, controller) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> controller.onAppStopped()
+                Lifecycle.Event.ON_START -> controller.onAppStarted()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 }
 
 @OptIn(UnstableApi::class)
@@ -304,17 +396,64 @@ fun VideoSurface(controller: StreamController, modifier: Modifier = Modifier, on
             it.resizeMode = if (controller.zoom) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
             it.subtitleView?.visibility = if (showSubtitles) android.view.View.VISIBLE else android.view.View.GONE
         },
+        // The shared player moves between screens: let go of this view's surface when it leaves.
+        onRelease = { it.player = null },
         modifier = modifier,
+    )
+}
+
+/**
+ * Video for the background of the menus. Unlike [VideoSurface] (a SurfaceView, which Android draws
+ * outside the normal view layers) this one fades with its container and fills its area like a
+ * header image (cropped, never letterboxed).
+ */
+@OptIn(UnstableApi::class)
+@Composable
+fun BackgroundVideoSurface(controller: StreamController, modifier: Modifier = Modifier) {
+    AndroidView(
+        factory = { ctx ->
+            android.view.TextureView(ctx).apply {
+                isFocusable = false
+                var videoAspect = 16f / 9f
+                // Center-crop: scale the picture (not the view) so it covers the whole area.
+                fun fit() {
+                    val w = width.toFloat()
+                    val h = height.toFloat()
+                    if (w <= 0f || h <= 0f) return
+                    val viewAspect = w / h
+                    val sx = if (videoAspect > viewAspect) videoAspect / viewAspect else 1f
+                    val sy = if (videoAspect > viewAspect) 1f else viewAspect / videoAspect
+                    setTransform(android.graphics.Matrix().apply { setScale(sx, sy, w / 2f, h / 2f) })
+                }
+                val listener = object : Player.Listener {
+                    override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                        if (videoSize.width > 0 && videoSize.height > 0) {
+                            videoAspect = videoSize.width * videoSize.pixelWidthHeightRatio / videoSize.height
+                            fit()
+                        }
+                    }
+                }
+                addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fit() }
+                tag = listener
+                listener.onVideoSizeChanged(controller.player.videoSize)
+                controller.player.addListener(listener)
+                controller.player.setVideoTextureView(this)
+            }
+        },
+        onRelease = { view ->
+            (view.tag as? Player.Listener)?.let { controller.player.removeListener(it) }
+            controller.player.clearVideoTextureView(view)
+        },
+        modifier = modifier.clipToBounds(),
     )
 }
 
 // ---------------------------------------------------------------------------------------------
 
 @OptIn(UnstableApi::class)
-private fun buildPlayer(context: Context, handleAudioFocus: Boolean, preferSoftware: () -> Boolean): ExoPlayer {
+private fun buildPlayer(context: Context, dataSource: OkHttpDataSource.Factory, handleAudioFocus: Boolean, preferSoftware: () -> Boolean): ExoPlayer {
     DecoderBudget.init(context)
     // OkHttp carries the configurable User-Agent and follows http<->https redirects, which IPTV panels use a lot.
-    val dataSource = OkHttpDataSource.Factory(Http.client)
     val mediaSources = DefaultMediaSourceFactory(context).setDataSourceFactory(dataSource)
     // Video decoders are listed hardware-first by default; flip that when this stream must use software.
     val codecSelector = MediaCodecSelector { mimeType, secure, tunneling ->
@@ -325,7 +464,8 @@ private fun buildPlayer(context: Context, handleAudioFocus: Boolean, preferSoftw
         .setMediaCodecSelector(codecSelector)
         .setEnableDecoderFallback(true)
     val loadControl = DefaultLoadControl.Builder()
-        .setBufferDurationsMs(15_000, 50_000, 2_000, 4_000)
+        // Start after 1.5 s of video (faster channel changes); 3 s after a rebuffer.
+        .setBufferDurationsMs(15_000, 50_000, 1_500, 3_000)
         .build()
     return ExoPlayer.Builder(context, renderers)
         .setMediaSourceFactory(mediaSources)

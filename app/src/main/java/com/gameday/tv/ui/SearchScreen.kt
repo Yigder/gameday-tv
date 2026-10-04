@@ -1,6 +1,8 @@
 package com.gameday.tv.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -28,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,6 +70,14 @@ fun SearchScreen(vm: AppViewModel) {
         results = vm.search(query)
         searching = false
     }
+    // Search (Enter) on the keyboard: remember the search and jump to the results once they're in.
+    var submitted by remember { mutableIntStateOf(0) }
+    val resultsFocus = remember { FocusRequester() }
+    LaunchedEffect(submitted, results, searching) {
+        if (submitted == 0 || searching || results == null) return@LaunchedEffect
+        if (results?.isEmpty == false) resultsFocus.requestFocusSafely(60)
+        submitted = 0
+    }
     LaunchedEffect(results) {
         // Remember searches that found something once the viewer pauses.
         if (results?.isEmpty == false) {
@@ -74,7 +87,7 @@ fun SearchScreen(vm: AppViewModel) {
     }
 
     Row(Modifier.fillMaxSize().padding(top = 32.dp)) {
-        Column(Modifier.width(330.dp).fillMaxHeight().padding(start = 48.dp, end = 12.dp)) {
+        Column(Modifier.width(340.dp).fillMaxHeight().padding(start = 48.dp, end = 10.dp).verticalScroll(rememberScrollState())) {
             Row(
                 Modifier.fillMaxWidth().height(46.dp).background(Color(0x1FFFFFFF), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -95,6 +108,13 @@ fun SearchScreen(vm: AppViewModel) {
                 onBackspace = { query = query.dropLast(1) },
                 onClear = { query = "" },
                 firstKey = firstKey,
+                onEnter = {
+                    if (query.trim().length < 2) vm.showMessage("Type at least 2 letters")
+                    else {
+                        vm.addRecentSearch(query)
+                        submitted++
+                    }
+                },
             )
             Spacer(Modifier.height(18.dp))
             if (vm.recentSearches.isNotEmpty() && query.isEmpty()) {
@@ -110,8 +130,9 @@ fun SearchScreen(vm: AppViewModel) {
                 query.trim().length < 2 -> SearchSuggestions(vm, screenKey) { query = it }
                 r == null || (searching && r.isEmpty) -> LoadingState("Searching…", Modifier.padding(top = 80.dp))
                 r.isEmpty -> EmptyState("No results for \"$query\"", "Try a team, a channel, a league, or a movie or show title.", Modifier.padding(top = 80.dp))
-                else -> PivotScroll(offset = ROW_TITLE) {
-                    LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 200.dp)) {
+                // New rows for each search, so they start at the first result.
+                else -> key(r) { PivotScroll(offset = ROW_TITLE) {
+                    LazyColumn(Modifier.focusRequester(resultsFocus), state = listState, contentPadding = PaddingValues(bottom = 200.dp)) {
                         if (r.games.isNotEmpty() || r.tournaments.isNotEmpty()) {
                             cardRow("games", "Games", nav) {
                                 items(r.tournaments, key = { it.id }) { TournamentCard(vm, it, screenKey) }
@@ -150,8 +171,16 @@ fun SearchScreen(vm: AppViewModel) {
                         if (r.series.isNotEmpty()) {
                             cardRow("series", "Shows", nav) { items(r.series, key = { it.id }) { SeriesCard(vm, it, screenKey) } }
                         }
+                        val odMovies = r.onDemand.filter { it.type == "movie" }
+                        val odShows = r.onDemand.filter { it.type != "movie" }
+                        if (odMovies.isNotEmpty()) {
+                            cardRow("od-movies", "On Demand movies", nav) { items(odMovies, key = { "od:" + it.id }) { AddonCard(vm, it, screenKey) } }
+                        }
+                        if (odShows.isNotEmpty()) {
+                            cardRow("od-shows", "On Demand shows", nav) { items(odShows, key = { "od:" + it.type + it.id }) { AddonCard(vm, it, screenKey) } }
+                        }
                     }
-                }
+                } }
             }
         }
     }

@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -85,7 +86,7 @@ fun LiveTab(vm: AppViewModel) {
                 (vm.iptv as? IptvStatus.Failed)?.message ?: "Connect your IPTV provider to see the live guide.",
             ) {
                 if (vm.iptv is IptvStatus.Failed) PillButton("Retry", { vm.reloadChannels() })
-                PillButton("Set up provider", { vm.navigate(Screen.Provider) }, primary = true)
+                PillButton("Set up provider", { vm.navigate(Screen.Provider()) }, primary = true)
             }
         }
         return
@@ -109,6 +110,8 @@ fun LiveTab(vm: AppViewModel) {
     val maxStart = floorSlot(now) + 22 * 3_600_000L
     val listState = rememberLazyListState()
     val gridFocus = remember { FocusRequester() }
+    val chipFocus = remember { FocusRequester() }
+    val selectedChip = remember { FocusRequester() }
     val tracker = remember { FocusTracker() }
     if (vm.tabWantsFocus) InitialFocus(vm, screenKey, gridFocus, tracker = tracker)
 
@@ -122,12 +125,21 @@ fun LiveTab(vm: AppViewModel) {
         pending = PendingFocus(channelId, target.coerceIn(next, next + WINDOW_MS - 60_000L))
     }
 
+    // After a category is picked, focus goes to the top of the guide (never back to the top bar).
+    var focusGridAfterPick by remember { mutableStateOf(false) }
+    LaunchedEffect(focusGridAfterPick, channels) {
+        if (!focusGridAfterPick) return@LaunchedEffect
+        listState.scrollToItem(0)
+        if (!gridFocus.requestFocusSafely(120)) chipFocus.requestFocusSafely(0)
+        focusGridAfterPick = false
+    }
+
     Column(Modifier.fillMaxSize().padding(top = 64.dp)) {
-        // ---- focused program details ----
-        Box(Modifier.fillMaxWidth().height(96.dp).padding(horizontal = 48.dp)) {
+        // ---- focused program details (live video plays to the right) ----
+        Box(Modifier.fillMaxWidth().height(150.dp).padding(horizontal = 48.dp), contentAlignment = Alignment.BottomStart) {
             val (ch, prog) = focused ?: (null to null)
             if (ch != null) {
-                Column(Modifier.fillMaxWidth(0.75f)) {
+                Column(Modifier.fillMaxWidth(0.55f).padding(bottom = 8.dp)) {
                     Text(prog?.title ?: cleanChannelName(ch.name), fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (prog?.isOnNow(now) == true) {
@@ -149,19 +161,26 @@ fun LiveTab(vm: AppViewModel) {
                     prog?.description?.takeIf { it.isNotBlank() }?.let {
                         Text(it, fontSize = 13.sp, color = Color(0xFFBBBBBB), maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
+                    vm.providerName(ch)?.let { Text(it, fontSize = 11.sp, color = AppColors.TextFaint, maxLines = 1) }
                 }
             }
         }
 
         // ---- filters ----
         LazyRow(
+            // Up from the guide comes back to the chosen filter.
+            Modifier.focusRequester(chipFocus).focusRestorer(selectedChip),
             contentPadding = PaddingValues(horizontal = 48.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             val opts = listOf("sports" to "Sports", "all" to "All channels", "favorites" to "Favorites", "recent" to "Recently watched")
-            items(opts, key = { it.first }) { (k, label) -> Chip(label, filter == k, { vm.updateGuideFilter(k) }) }
+            items(opts, key = { it.first }) { (k, label) ->
+                Chip(label, filter == k, { vm.updateGuideFilter(k) }, if (filter == k) Modifier.focusRequester(selectedChip) else Modifier)
+            }
             item(key = "groups") {
-                Chip(if (filter.startsWith("group:")) filter.removePrefix("group:") else "Categories", filter.startsWith("group:"), { pickingGroup = true }, icon = Icons.Guide)
+                val isGroup = filter.startsWith("group:")
+                Chip(if (isGroup) filter.removePrefix("group:") else "Categories", isGroup, { pickingGroup = true },
+                    if (isGroup) Modifier.focusRequester(selectedChip) else Modifier, icon = Icons.Guide)
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -216,7 +235,11 @@ fun LiveTab(vm: AppViewModel) {
                                 dpPerMs = dpPerMs,
                                 pending = pending,
                                 onPendingDone = { pending = null },
-                                onFocus = { p -> focused = ch to p },
+                                onFocus = { p ->
+                                    focused = ch to p
+                                    // Resting on a channel previews it in the corner, like YouTube TV.
+                                    vm.heroFocus = heroFor(ch, p?.takeIf { it.isOnNow(System.currentTimeMillis()) })
+                                },
                                 onEdge = { right, cellStart, cellEnd ->
                                     if (right) shift(true, ch.id, cellEnd) else shift(false, ch.id, cellStart - 60_000L)
                                 },
@@ -236,10 +259,14 @@ fun LiveTab(vm: AppViewModel) {
             groups = catalog.sportsGroups + catalog.groups.filter { it !in catalog.sportsGroupSet },
             counts = { catalog.byGroup[it]?.size ?: 0 },
             onPick = { g ->
-                pickingGroup = false
                 vm.updateGuideFilter("group:$g")
+                pickingGroup = false
+                focusGridAfterPick = true
             },
-            onDismiss = { pickingGroup = false },
+            onDismiss = {
+                pickingGroup = false
+                focusGridAfterPick = true
+            },
         )
     }
 }
@@ -395,7 +422,10 @@ private fun ProgramCell(
                 else -> channelMenu(vm, channel, channels)
             }
         },
-        onLongClick = { if (program != null) programMenu(vm, channel, program, channels) else channelMenu(vm, channel, channels) },
+        onLongClick = {
+            OkKeyGate.swallowRelease()
+            if (program != null) programMenu(vm, channel, program, channels) else channelMenu(vm, channel, channels)
+        },
         modifier = modifier
             .rememberFocus(vm, screenKey, "${channel.id}@$cellStart")
             .focusRequester(requester)
@@ -447,7 +477,7 @@ private fun ProgramCell(
     }
 }
 
-/** Provider categories, sports first. */
+/** Provider categories, sports first. Focus stays inside the sheet until something is picked. */
 @Composable
 private fun GroupPicker(groups: List<String>, counts: (String) -> Int, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     val first = remember { FocusRequester() }
@@ -455,7 +485,8 @@ private fun GroupPicker(groups: List<String>, counts: (String) -> Int, onPick: (
     androidx.activity.compose.BackHandler(onBack = onDismiss)
     Box(Modifier.fillMaxSize().background(Color(0xB3000000))) {
         Column(
-            Modifier.align(Alignment.CenterEnd).width(420.dp).fillMaxHeight().background(Color(0xFF1F1F1F)).padding(horizontal = 20.dp, vertical = 28.dp),
+            Modifier.align(Alignment.CenterEnd).width(420.dp).fillMaxHeight().background(Color(0xFF1F1F1F))
+                .trapFocus().padding(start = 20.dp, end = 20.dp, top = 84.dp, bottom = 28.dp),
         ) {
             Text("Categories", fontSize = 22.sp, fontWeight = FontWeight.Medium)
             Text("From your provider", fontSize = 13.sp, color = AppColors.TextDim)

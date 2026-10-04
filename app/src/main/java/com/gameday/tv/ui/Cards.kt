@@ -1,6 +1,9 @@
 package com.gameday.tv.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -25,7 +28,9 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -92,7 +97,7 @@ fun MediaCard(
     Column(Modifier.width(width)) {
         Surface(
             onClick = onClick,
-            onLongClick = onLongClick,
+            onLongClick = onLongClick.swallowingRelease(),
             modifier = modifier
                 .fillMaxWidth()
                 .aspectRatio(aspect)
@@ -116,7 +121,8 @@ fun MediaCard(
         ) {
             Box(Modifier.fillMaxSize().clip(shape)) { thumb() }
         }
-        Spacer(Modifier.height(if (focused) 10.dp else 8.dp))
+        // Fixed spacing: changing it on focus would resize the row on every move (a visible jump).
+        Spacer(Modifier.height(10.dp))
         Text(
             title,
             fontSize = 14.sp,
@@ -163,13 +169,18 @@ private fun Modifier.upToPreviousRow(nav: RowNav?, key: String): Modifier {
     }
 }
 
-/** A titled horizontal row of cards. */
+/**
+ * A titled horizontal row of cards. Coming back to the row (Up/Down) lands on the card last
+ * focused in it, not whichever card happens to line up.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
 fun LazyListScope.cardRow(key: String, title: String, nav: RowNav? = null, content: LazyListScope.() -> Unit) {
     item(key = key) {
         Column(Modifier.upToPreviousRow(nav, key).padding(bottom = 18.dp)) {
             SectionTitle(title, Modifier.padding(start = 48.dp, bottom = 10.dp))
             DefaultScroll {
                 LazyRow(
+                    modifier = Modifier.focusRestorer(),
                     contentPadding = PaddingValues(horizontal = 48.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     content = content,
@@ -315,21 +326,40 @@ data class HeroInfo(
     val game: Game? = null,
     val channel: Channel? = null,
     val progress: Float? = null,
+    val tournament: Tournament? = null,
 )
 
+/**
+ * The header of a main tab: the focused card ([AppViewModel.heroFocus]) or [default]. Reading the
+ * focus here (not in the tab) means moving between cards only redraws the header, and a short
+ * settle delay skips the headers of cards the viewer just scrolls past.
+ */
 @Composable
-fun Hero(info: HeroInfo?, modifier: Modifier = Modifier, hideScores: Boolean = false) {
+fun TabHero(vm: AppViewModel, default: HeroInfo, modifier: Modifier = Modifier, compact: Boolean = false, videoBehind: Boolean = false) {
+    val target = vm.heroFocus ?: default
+    var shown by remember { mutableStateOf(target) }
+    LaunchedEffect(target) {
+        if (shown != target) {
+            delay(110)
+            shown = target
+        }
+    }
+    Hero(shown, modifier, vm.hideScores, compact = compact, artBehind = !videoBehind)
+}
+
+@Composable
+fun Hero(info: HeroInfo?, modifier: Modifier = Modifier, hideScores: Boolean = false, compact: Boolean = false, artBehind: Boolean = true) {
     AnimatedContent(
         targetState = info,
-        transitionSpec = { fadeIn() togetherWith fadeOut() },
+        transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
         contentKey = { it?.title + it?.meta?.joinToString() },
         modifier = modifier,
         label = "hero",
     ) { h ->
         Box(Modifier.fillMaxSize()) {
             if (h == null) return@Box
-            // Art on the right, fading into the background on the left and bottom.
-            Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(0.58f)) {
+            // Art on the right, fading into the background on the left and bottom (unless live video plays there).
+            if (artBehind) Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(0.58f)) {
                 when {
                     h.game != null -> GameArt(h.game, logoFraction = 0.5f, showScore = !hideScores, big = true)
                     h.image != null -> AsyncImage(h.image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -344,8 +374,10 @@ fun Hero(info: HeroInfo?, modifier: Modifier = Modifier, hideScores: Boolean = f
                 )
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.6f to Color.Transparent, 1f to AppColors.Background)))
             }
-            Column(Modifier.align(Alignment.CenterStart).fillMaxWidth(0.52f).padding(start = 48.dp)) {
-                Text(h.title, fontSize = 30.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 34.sp)
+            // Text sits at the bottom so long titles never run into the top bar.
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth(0.52f).padding(start = 48.dp, bottom = 10.dp)) {
+                Text(h.title, fontSize = if (compact) 26.sp else 30.sp, fontWeight = FontWeight.Medium, maxLines = if (compact) 1 else 2,
+                    overflow = TextOverflow.Ellipsis, lineHeight = 34.sp)
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (h.live) {
@@ -360,7 +392,7 @@ fun Hero(info: HeroInfo?, modifier: Modifier = Modifier, hideScores: Boolean = f
                 }
                 if (!h.description.isNullOrBlank()) {
                     Spacer(Modifier.height(10.dp))
-                    Text(h.description, fontSize = 14.sp, color = Color(0xFFCCCCCC), maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 19.sp)
+                    Text(h.description, fontSize = 14.sp, color = Color(0xFFCCCCCC), maxLines = if (compact) 2 else 3, overflow = TextOverflow.Ellipsis, lineHeight = 19.sp)
                 }
             }
         }
@@ -395,6 +427,7 @@ fun heroFor(t: Tournament, hideScores: Boolean): HeroInfo = HeroInfo(
     meta = listOfNotNull(t.tour.label, t.broadcasts.firstOrNull(), t.detail),
     description = if (hideScores) null else t.leaders.take(3).joinToString("\n") { "${it.position}. ${it.name}  ${it.toPar}" },
     live = t.roundInProgress,
+    tournament = t,
 )
 
 fun heroFor(channel: Channel, program: Program?, now: Long = System.currentTimeMillis()): HeroInfo = HeroInfo(

@@ -40,6 +40,7 @@ import com.gameday.tv.data.Http
 import com.gameday.tv.data.IptvAccount
 import com.gameday.tv.data.Leagues
 import com.gameday.tv.data.ScoreBugMode
+import com.gameday.tv.data.Subtitles
 import com.gameday.tv.data.XtreamSource
 import com.gameday.tv.ui.theme.AppColors
 import kotlinx.coroutines.launch
@@ -55,18 +56,21 @@ fun SettingsScreen(vm: AppViewModel) {
     Row(Modifier.fillMaxSize().padding(top = 36.dp)) {
         Column(Modifier.width(280.dp).fillMaxHeight().padding(start = 40.dp, end = 12.dp)) {
             Text("Settings", fontSize = 26.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 16.dp, bottom = 14.dp))
-            SettingsSection.entries.forEach { s ->
-                var focused by remember { mutableStateOf(false) }
-                LaunchedEffect(focused) { if (focused && vm.settingsSection != s) vm.settingsSection = s }
-                SettingRow(
-                    title = s.label,
-                    onClick = { vm.settingsSection = s },
-                    icon = sectionIcon(s),
-                    chevron = s == section && !focused,
-                    modifier = Modifier
-                        .onFocusChanged { focused = it.isFocused }
-                        .then(if (s == section) Modifier.focusRequester(first) else Modifier),
-                )
+            // Left from the options returns to the open section, not the one that lines up.
+            Column(Modifier.returnFocusTo(first)) {
+                SettingsSection.entries.forEach { s ->
+                    var focused by remember { mutableStateOf(false) }
+                    LaunchedEffect(focused) { if (focused && vm.settingsSection != s) vm.settingsSection = s }
+                    SettingRow(
+                        title = s.label,
+                        onClick = { vm.settingsSection = s },
+                        icon = sectionIcon(s),
+                        chevron = s == section && !focused,
+                        modifier = Modifier
+                            .onFocusChanged { focused = it.isFocused }
+                            .then(if (s == section) Modifier.focusRequester(first) else Modifier),
+                    )
+                }
             }
         }
         Box(Modifier.weight(1f).fillMaxHeight().padding(end = 48.dp)) {
@@ -75,6 +79,7 @@ fun SettingsScreen(vm: AppViewModel) {
                     SettingsSection.ACCOUNT -> accountSection(vm)
                     SettingsSection.PROFILES -> profilesSection(vm)
                     SettingsSection.PROVIDER -> providerSection(vm)
+                    SettingsSection.ADDONS -> addonsSection(vm)
                     SettingsSection.SPORTS -> sportsSection(vm)
                     SettingsSection.GUIDE -> guideSection(vm)
                     SettingsSection.PLAYBACK -> playbackSection(vm)
@@ -90,6 +95,7 @@ private fun sectionIcon(s: SettingsSection) = when (s) {
     SettingsSection.ACCOUNT -> Icons.Person
     SettingsSection.PROFILES -> Icons.Edit
     SettingsSection.PROVIDER -> Icons.Tv
+    SettingsSection.ADDONS -> Icons.Movie
     SettingsSection.SPORTS -> Icons.Trophy
     SettingsSection.GUIDE -> Icons.Guide
     SettingsSection.PLAYBACK -> Icons.Play
@@ -213,48 +219,118 @@ private fun LazyListScope.profilesSection(vm: AppViewModel) {
 // ---------------------------------------------------------------------------------------------
 
 private fun LazyListScope.providerSection(vm: AppViewModel) {
-    header("TV provider")
-    when (val p = vm.providerAccount) {
-        null -> item(key = "none") {
+    header("TV providers", "Add more than one login or playlist: their channels, guides, movies and shows are combined.")
+    if (vm.providers.isEmpty()) {
+        item(key = "none") {
             Text("No provider connected. GameDay TV shows live scores, but you'll need a provider to watch.", fontSize = 14.sp,
                 color = AppColors.TextDim, modifier = Modifier.padding(16.dp))
         }
-        is IptvAccount.Xtream -> {
-            info("Type", "Xtream Codes")
-            info("Server", XtreamSource.normalizeServer(p.server))
-            info("Username", p.username)
-        }
-        is IptvAccount.M3u -> {
-            info("Type", "M3U playlist")
-            info("Playlist", p.url.substringBefore('?') + if ('?' in p.url) "?…" else "")
-            p.epgUrl?.let { info("Guide", it.substringBefore('?')) }
-        }
     }
-    vm.accountInfo?.let { a ->
-        a.status?.let { info("Status", it) }
-        a.expiresAtMillis?.let { info("Expires", formatDate(it)) }
-        a.maxConnections?.let { info("Streams at once", "${a.activeConnections ?: "?"} in use / $it allowed") }
-    }
-    when (val s = vm.iptv) {
-        is IptvStatus.Ready -> {
-            val nf = NumberFormat.getIntegerInstance()
-            info("Channels", nf.format(s.catalog.channels.size))
-            info("Categories", "${nf.format(s.catalog.groups.size)} (${s.catalog.sportsGroups.size} sports)")
-        }
-        IptvStatus.Loading -> info("Channels", "Loading…")
-        is IptvStatus.Failed -> info("Problem", s.message)
-        IptvStatus.NotConfigured -> Unit
+    val nf = NumberFormat.getIntegerInstance()
+    items(vm.providers.toList(), key = { "pv:" + it.id }) { p ->
+        val status = vm.providerStatus[p.id]
+        val info = vm.providerInfo[p.id]
+        val detail = listOfNotNull(
+            when (val a = p.account) {
+                is IptvAccount.Xtream -> "Xtream Codes · ${a.username}"
+                is IptvAccount.M3u -> "M3U playlist"
+            },
+            when {
+                !p.enabled -> "Turned off"
+                status is IptvStatus.Ready -> "${nf.format(status.catalog.channels.size)} channels"
+                status is IptvStatus.Loading -> "Loading…"
+                status is IptvStatus.Failed -> status.message
+                else -> null
+            },
+            info?.expiresAtMillis?.let { "Expires ${formatDate(it)}" },
+            info?.maxConnections?.let { "${info.activeConnections ?: "?"}/$it streams in use" },
+        ).joinToString(" · ")
+        SettingRow(
+            title = p.name,
+            onClick = { providerMenu(vm, p) },
+            subtitle = detail,
+            icon = if (status is IptvStatus.Failed) Icons.Info else Icons.Tv,
+            chevron = true,
+        )
     }
     header("Manage")
-    item(key = "change") { SettingRow(if (vm.hasProvider) "Change provider login" else "Connect a provider", { vm.navigate(Screen.Provider) }, icon = Icons.Edit, chevron = true) }
+    item(key = "add") { SettingRow(if (vm.hasProvider) "Add another provider" else "Connect a provider", { vm.navigate(Screen.Provider()) }, icon = Icons.Add, chevron = true) }
     if (vm.hasProvider) {
-        item(key = "reload") { SettingRow("Reload channels", { vm.reloadChannels() }, subtitle = "Get the latest lineup, guide, movies and shows", icon = Icons.Refresh) }
-        item(key = "remove") {
-            SettingRow("Remove provider", {
-                vm.confirm("Remove your TV provider?", "You'll still get live scores. Recordings stay in your library.", "Remove") { vm.removeProvider() }
-            }, icon = Icons.Delete)
+        item(key = "reload") { SettingRow("Reload channels", { vm.reloadChannels() }, subtitle = "Get the latest lineups, guides, movies and shows", icon = Icons.Refresh) }
+    }
+}
+
+private fun providerMenu(vm: AppViewModel, p: com.gameday.tv.data.ProviderEntry) {
+    vm.showDialog(
+        AppDialog(
+            title = p.name,
+            subtitle = when (val a = p.account) {
+                is IptvAccount.Xtream -> XtreamSource.normalizeServer(a.server)
+                is IptvAccount.M3u -> a.url.substringBefore('?')
+            },
+            actions = listOf(
+                DialogAction("Edit login", Icons.Edit) { vm.dismissDialog(); vm.navigate(Screen.Provider(p.id)) },
+                DialogAction(if (p.enabled) "Turn off" else "Turn on", Icons.Tv) { vm.dismissDialog(); vm.setProviderEnabled(p.id, !p.enabled) },
+                DialogAction("Remove", Icons.Delete) {
+                    vm.dismissDialog()
+                    vm.confirm("Remove ${p.name}?", "Its channels leave the guide. Recordings stay in your library.", "Remove") { vm.removeProvider(p.id) }
+                },
+            ),
+        ),
+    )
+}
+
+// ---------------------------------------------------------------------------------------------
+
+private fun LazyListScope.addonsSection(vm: AppViewModel) {
+    val addons = vm.addons
+    header("Add-ons", "Stremio-compatible add-ons for On Demand: catalogs (like Cinemeta), sources (like Comet) and subtitles (like OpenSubtitles).")
+    items(addons.installed.toList(), key = { "ad:" + it.url }) { a ->
+        val m = a.manifest
+        val what = listOfNotNull(
+            if (a.hasCatalogs) "${m.catalogs.size} catalog${if (m.catalogs.size == 1) "" else "s"}" else null,
+            if (a.hasStreams) "Sources" else null,
+            if (a.hasSubtitles) "Subtitles" else null,
+            if (!a.enabled) "Turned off" else null,
+        ).joinToString(" · ")
+        SettingRow(m.name, { addonMenu(vm, a) }, subtitle = listOfNotNull(what.ifBlank { null }, m.version.ifBlank { null }?.let { "v$it" }).joinToString(" · "),
+            icon = Icons.Movie, chevron = true)
+    }
+    item(key = "add") { SettingRow("Add an add-on", { vm.navigate(Screen.AddonInstall) }, subtitle = "Paste its link, or send it from your phone", icon = Icons.Add, chevron = true) }
+    if (!addons.hasSubtitleAddons) {
+        item(key = "add-subs") {
+            SettingRow("Add OpenSubtitles", { addons.installInBackground(Subtitles.OPENSUBTITLES) },
+                subtitle = "Subtitles in many languages for On Demand movies and shows", icon = Icons.Captions)
         }
     }
+    header("TorBox", "Plays torrent sources from TorBox's servers. ⚡ marks sources TorBox already has.")
+    if (addons.torboxConnected) {
+        item(key = "tb") { SettingRow("TorBox", { vm.navigate(Screen.TorBoxSetup) }, subtitle = addons.torboxStatus ?: "Connected", value = "Change key", icon = Icons.Check) }
+        item(key = "tb-remove") { SettingRow("Remove TorBox", { vm.confirm("Remove TorBox?", "Torrent sources won't play until you add a key again.", "Remove") { addons.removeTorBox() } }, icon = Icons.Delete) }
+    } else {
+        item(key = "tb") { SettingRow("Connect TorBox", { vm.navigate(Screen.TorBoxSetup) }, subtitle = "Use your TorBox API key", icon = Icons.Add, chevron = true) }
+    }
+    item(key = "note") {
+        Text(
+            "GameDay TV doesn't host or provide any content. Add-ons are made by others; only stream content you have the rights to watch.",
+            fontSize = 12.sp, color = AppColors.TextFaint, modifier = Modifier.padding(16.dp),
+        )
+    }
+}
+
+private fun addonMenu(vm: AppViewModel, a: com.gameday.tv.data.InstalledAddon) {
+    val addons = vm.addons
+    vm.showDialog(
+        AppDialog(
+            title = a.name,
+            subtitle = a.manifest.description,
+            actions = listOfNotNull(
+                if (addons.installed.indexOfFirst { it.url == a.url } > 0) DialogAction("Move up", Icons.ChevronRight) { vm.dismissDialog(); addons.moveUp(a) } else null,
+                DialogAction(if (a.enabled) "Turn off" else "Turn on", Icons.Movie) { vm.dismissDialog(); addons.setEnabled(a, !a.enabled) },
+                DialogAction("Remove", Icons.Delete) { vm.dismissDialog(); addons.remove(a) },
+            ),
+        ),
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -274,6 +350,18 @@ private fun LazyListScope.sportsSection(vm: AppViewModel) {
     item(key = "alerts") {
         SettingRow("Score alerts", { vm.updateScoreAlerts(!vm.scoreAlerts) }, subtitle = "Pop up the score when it changes, and when your teams score", checked = vm.scoreAlerts)
     }
+    item(key = "delay") {
+        val steps = listOf(0, 30, 60, 90, 120)
+        val next = steps[(steps.indexOf(vm.scoreDelaySec).coerceAtLeast(0) + 1) % steps.size]
+        SettingRow("Score delay", { vm.updateScoreDelay(next) },
+            subtitle = "IPTV runs behind the live broadcast. The score bug and alerts wait this long so they don't spoil plays.",
+            value = when (vm.scoreDelaySec) {
+                0 -> "Off"
+                60 -> "1 min"
+                120 -> "2 min"
+                else -> "${vm.scoreDelaySec} s"
+            })
+    }
     header("Your teams", "Teams you add get a Home row, alerts, and optional automatic recording.")
     items(vm.favorites.toList(), key = { "t:" + it.key }) { t ->
         SettingRow(
@@ -286,9 +374,10 @@ private fun LazyListScope.sportsSection(vm: AppViewModel) {
     }
     item(key = "teams") { SettingRow("Add or remove teams", { vm.navigate(Screen.TeamsPicker) }, icon = Icons.Add, chevron = true) }
     header("Sports you follow")
-    items(Leagues.everything, key = { "l:" + it.key }) { l ->
-        val on = l.key in vm.enabledLeagues
-        SettingRow(l.label, { vm.setLeagueEnabled(l.key, !on) }, subtitle = sportName(l.sport), checked = on)
+    items(Leagues.picks, key = { "l:" + it.key }) { p ->
+        val on = vm.isSportEnabled(p)
+        SettingRow(p.label, { vm.setSportEnabled(p, !on) },
+            subtitle = if (p.leagues.size > 1) p.leagues.joinToString(" & ") { it.label } else sportName(p.sport), checked = on)
     }
 }
 
@@ -323,21 +412,78 @@ private fun LazyListScope.playbackSection(vm: AppViewModel) {
             subtitle = "MPEG-TS starts fastest on most providers. If a channel won't play, the other format is tried automatically.",
             value = vm.streamFormat.label)
     }
+    header("Video decoding")
+    item(key = "dec-player") {
+        val mode = vm.decoderMode(DecoderSlot.PLAYER)
+        SettingRow("Full-screen player", { vm.setDecoderMode(DecoderSlot.PLAYER, mode.next()) },
+            subtitle = "Automatic uses hardware when it's free. Software runs on the CPU and suits smaller or lower-resolution streams.",
+            value = mode.label)
+    }
+    for (slot in 0 until 4) {
+        item(key = "dec-mv$slot") {
+            val key = DecoderSlot.multiview(slot)
+            val mode = vm.decoderMode(key)
+            SettingRow("Multiview screen ${slot + 1}", { vm.setDecoderMode(key, mode.next()) },
+                subtitle = if (slot == 0) "Give the big screen hardware and the small ones software when this TV can't run them all in hardware" else null,
+                value = mode.label)
+        }
+    }
     item(key = "decoder") {
         SettingRow("Reset video decoder limit", { vm.resetDecoderLimit() },
-            subtitle = if (DecoderBudget.limit > 0) "This TV handles ${DecoderBudget.limit} hardware videos at once; extra Multiview screens use software"
-            else "Learned automatically when Multiview runs out of hardware decoders")
+            subtitle = if (DecoderBudget.limit > 0) "This TV handles ${DecoderBudget.limit} hardware videos at once; extra Automatic streams use software"
+            else "Learned automatically when Multiview runs out of hardware decoders. Applies to Automatic streams.")
     }
+    header("Menus")
+    item(key = "bg") {
+        val modes = listOf("sound", "muted", "off")
+        val next = modes[(modes.indexOf(vm.backgroundVideo).coerceAtLeast(0) + 1) % modes.size]
+        SettingRow("Live TV behind the menus", { vm.updateBackgroundVideo(next) },
+            subtitle = "Like YouTube TV: what you were watching keeps playing at the top of Home, Sports and Live, and previews the channel you rest on.",
+            value = when (vm.backgroundVideo) {
+                "sound" -> "With sound"
+                "muted" -> "Muted"
+                else -> "Off"
+            })
+    }
+    item(key = "smooth") { SmoothMotionRow() }
     header("Remote")
-    item(key = "zap") {
-        SettingRow("Up/Down changes channel", { vm.updateZapWithDpad(!vm.zapWithDpad) },
-            subtitle = "Off: Up/Down show the player controls, like YouTube TV. CH+/CH− always change channel.", checked = vm.zapWithDpad)
+    item(key = "keys") {
+        Text(
+            "While watching: Up shows or hides the score bug · Down or OK shows the controls · CH+/CH− change channel · hold OK for Multiview.",
+            fontSize = 13.sp, color = AppColors.TextDim, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        )
     }
-    header("Captions & episodes")
-    item(key = "cc") { SettingRow("Captions", { vm.updateCaptions(!vm.captions) }, subtitle = "When the stream has them", checked = vm.captions) }
+    header("Player")
+    item(key = "buttons") {
+        val sizes = listOf("small", "medium", "large")
+        SettingRow("Player buttons", { vm.updatePlayerButtons(sizes[(sizes.indexOf(vm.playerButtons) + 1) % sizes.size]) },
+            subtitle = "Size of the round buttons under live TV, movies and shows",
+            value = vm.playerButtons.replaceFirstChar { it.uppercase() })
+    }
     item(key = "autoplay") { SettingRow("Autoplay next episode", { vm.updateAutoplay(!vm.autoplayNext) }, checked = vm.autoplayNext) }
+    header("Subtitles", "From the video itself, or from subtitle add-ons for On Demand titles. Pick one in the player's settings (Menu, or the gear).")
+    item(key = "cc") { SettingRow("Subtitles", { vm.updateCaptions(!vm.captions) }, subtitle = "Turn on when there are any", checked = vm.captions) }
+    item(key = "cc-preview") { SubtitlePreview(vm.subtitleStyle, Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) }
+    subtitleStyleItems(vm, "s")
     header("Advanced")
     item(key = "ua") { UserAgentEditor(vm) }
+}
+
+@Composable
+private fun SmoothMotionRow() {
+    val activity = LocalContext.current as? android.app.Activity ?: return
+    var on by remember { mutableStateOf(DisplayModes.enabled(activity)) }
+    var detail by remember { mutableStateOf(DisplayModes.describe(activity)) }
+    SettingRow(
+        "Smooth motion (up to 120 Hz)",
+        {
+            on = !on
+            DisplayModes.setEnabled(activity, on)
+            detail = DisplayModes.describe(activity)
+        },
+        subtitle = "Uses the TV's fastest refresh rate for the menus when it has one. $detail",
+        checked = on,
+    )
 }
 
 @Composable

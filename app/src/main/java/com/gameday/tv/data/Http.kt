@@ -31,19 +31,52 @@ object Http {
             .build()
     }
 
-    suspend fun getString(url: String): String = withStream(url) { it.bufferedReader().readText() }
+    suspend fun getString(url: String, headers: Map<String, String> = emptyMap()): String =
+        withStream(url, headers) { it.bufferedReader().readText() }
+
+    /** The whole body, at most [maxBytes] (subtitle files). */
+    suspend fun getBytes(url: String, maxBytes: Int = 8 * 1024 * 1024): ByteArray = withStream(url) { input ->
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(16 * 1024)
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            out.write(buf, 0, n)
+            if (out.size() > maxBytes) throw IOException("The file is too large.")
+        }
+        out.toByteArray()
+    }
 
     /** Streams the response body to [block] on the IO dispatcher (used for large channel lists). */
-    suspend fun <T> withStream(url: String, block: (InputStream) -> T): T = withContext(Dispatchers.IO) {
-        val request = try {
-            Request.Builder().url(url).build()
-        } catch (e: IllegalArgumentException) {
-            throw IOException("That address isn't a valid URL.")
-        }
+    suspend fun <T> withStream(url: String, headers: Map<String, String> = emptyMap(), block: (InputStream) -> T): T = withContext(Dispatchers.IO) {
+        val request = buildRequest(url, headers).build()
         client.newCall(request).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException(describeHttpError(resp.code))
             block(resp.body.byteStream())
         }
+    }
+
+    /** A request whose body is read whatever the status (APIs that explain errors in JSON). */
+    suspend fun call(url: String, headers: Map<String, String> = emptyMap(), form: Map<String, String>? = null): HttpResult =
+        withContext(Dispatchers.IO) {
+            val builder = buildRequest(url, headers)
+            if (form != null) {
+                val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM).apply {
+                    form.forEach { (k, v) -> addFormDataPart(k, v) }
+                }.build()
+                builder.post(body)
+            }
+            client.newCall(builder.build()).execute().use { resp -> HttpResult(resp.code, resp.body.string()) }
+        }
+
+    private fun buildRequest(url: String, headers: Map<String, String>): Request.Builder {
+        val builder = try {
+            Request.Builder().url(url)
+        } catch (e: IllegalArgumentException) {
+            throw IOException("That address isn't a valid URL.")
+        }
+        headers.forEach { (k, v) -> builder.header(k, v) }
+        return builder
     }
 
     fun describeHttpError(code: Int): String = when (code) {
@@ -53,4 +86,8 @@ object Http {
         in 500..599 -> "The server had a problem (HTTP $code). Try again later."
         else -> "Request failed (HTTP $code)."
     }
+}
+
+class HttpResult(val code: Int, val body: String) {
+    val ok: Boolean get() = code in 200..299
 }

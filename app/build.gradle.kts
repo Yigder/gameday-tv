@@ -21,8 +21,8 @@ android {
         applicationId = "com.gameday.tv"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "2.0.0"
+        versionCode = 6
+        versionName = "2.3.0"
     }
 
     signingConfigs {
@@ -89,6 +89,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
+
+    // QR codes for sending add-on links and keys from a phone
+    implementation("com.google.zxing:core:3.5.3")
 
     testImplementation("junit:junit:4.13.2")
     // Real org.json for unit tests (android.jar only has stubs).

@@ -26,7 +26,16 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.tv.material3.Text
+import androidx.compose.runtime.LaunchedEffect
+import com.gameday.tv.ui.AddonBrowseScreen
+import com.gameday.tv.ui.AddonDetailScreen
+import com.gameday.tv.ui.AddonInstallScreen
 import com.gameday.tv.ui.AppViewModel
+import com.gameday.tv.ui.DisplayModes
+import com.gameday.tv.ui.FollowAppLifecycle
+import com.gameday.tv.ui.KeyActivity
+import com.gameday.tv.ui.TorBoxSetupScreen
+import com.gameday.tv.ui.WatchStalls
 import com.gameday.tv.ui.BrowseScreen
 import com.gameday.tv.ui.ChannelScreen
 import com.gameday.tv.ui.CreateAccountScreen
@@ -44,6 +53,7 @@ import com.gameday.tv.ui.ProfilesScreen
 import com.gameday.tv.ui.ProviderScreen
 import com.gameday.tv.ui.Screen
 import com.gameday.tv.ui.SearchScreen
+import com.gameday.tv.ui.OnDemandSearchScreen
 import com.gameday.tv.ui.SeriesScreen
 import com.gameday.tv.ui.SettingsScreen
 import com.gameday.tv.ui.SignInScreen
@@ -63,12 +73,15 @@ class MainActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+        // Smooth motion: the TV's fastest refresh rate (e.g. 120 Hz) when it has one.
+        DisplayModes.apply(this)
         setContent {
             GameDayTheme { GameDayApp() }
         }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        KeyActivity.onKey(event)
         if (OkKeyGate.shouldConsume(event)) return true
         return super.dispatchKeyEvent(event)
     }
@@ -79,6 +92,12 @@ private fun GameDayApp(vm: AppViewModel = viewModel()) {
     val screen = vm.screen
     // Keeps each screen's scroll positions/selections when navigating back to it.
     val stateHolder = rememberSaveableStateHolder()
+
+    // The shared player (full screen + live video behind the menus).
+    val main = vm.mainStream
+    FollowAppLifecycle(main)
+    WatchStalls(main)
+    LaunchedEffect(screen) { vm.onScreenChanged(screen) }
 
     BackHandler(enabled = vm.dialog != null) { vm.dismissDialog() }
     BackHandler(enabled = vm.dialog == null && vm.canGoBack) { vm.back() }
@@ -91,12 +110,17 @@ private fun GameDayApp(vm: AppViewModel = viewModel()) {
                 is Screen.SignIn -> SignInScreen(vm, screen.email)
                 Screen.CreateAccount -> CreateAccountScreen(vm)
                 is Screen.Onboarding -> OnboardingScreen(vm, screen.step)
-                Screen.Provider -> ProviderScreen(vm, onboarding = false)
+                is Screen.Provider -> ProviderScreen(vm, onboarding = false, editId = screen.editId)
+                Screen.AddonInstall -> AddonInstallScreen(vm)
+                Screen.TorBoxSetup -> TorBoxSetupScreen(vm)
+                is Screen.AddonDetail -> AddonDetailScreen(vm, screen.type, screen.id)
+                is Screen.AddonBrowse -> AddonBrowseScreen(vm, screen.rowKey)
                 Screen.TeamsPicker -> TeamsPickerScreen(vm)
                 is Screen.Profiles -> ProfilesScreen(vm, screen.manage)
                 is Screen.ProfileEdit -> ProfileEditScreen(vm, screen.profileId)
                 Screen.Main -> MainShell(vm, stateHolder)
                 Screen.Search -> SearchScreen(vm)
+                Screen.OnDemandSearch -> OnDemandSearchScreen(vm)
                 is Screen.Settings -> SettingsScreen(vm)
                 is Screen.GameDetail -> GameScreen(vm, screen.gameId)
                 is Screen.TournamentDetail -> TournamentScreen(vm, screen.tournamentId)

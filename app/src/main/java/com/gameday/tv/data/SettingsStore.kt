@@ -96,11 +96,33 @@ class AccountStore(private val context: Context) {
 class AccountPrefs(context: Context, val accountId: String) {
     private val prefs = context.getSharedPreferences(prefsName(accountId), Context.MODE_PRIVATE)
 
-    /** IPTV login, encrypted with a key from the Android Keystore. */
-    var iptv: IptvAccount?
+    /** The single IPTV login from before multiple providers (2.0). Read once to migrate. */
+    private val legacyIptv: IptvAccount?
         get() = Vault.open(prefs.getString(K_IPTV, null))?.let { decodeIptv(it) }
+
+    /** IPTV logins and playlists, encrypted with a key from the Android Keystore. */
+    var providers: List<ProviderEntry>
+        get() {
+            Vault.open(prefs.getString(K_PROVIDERS, null))?.let { return Providers.decode(it) }
+            val old = legacyIptv ?: return emptyList()
+            return listOf(ProviderEntry(UUID.randomUUID().toString(), ProviderEntry.defaultName(old), old, prefix = "")).also { providers = it }
+        }
         set(v) {
-            prefs.edit().apply { if (v == null) remove(K_IPTV) else putString(K_IPTV, Vault.seal(encodeIptv(v))) }.apply()
+            prefs.edit().putString(K_PROVIDERS, Vault.seal(Providers.encode(v))).remove(K_IPTV).apply()
+        }
+
+    /** Streaming add-ons (manifest URLs can hold debrid keys, so they're encrypted). Null until first set up. */
+    var addons: List<InstalledAddon>?
+        get() = Vault.open(prefs.getString(K_ADDONS, null))?.let { Addons.decodeInstalled(it) }
+        set(v) {
+            prefs.edit().apply { if (v == null) remove(K_ADDONS) else putString(K_ADDONS, Vault.seal(Addons.encodeInstalled(v))) }.apply()
+        }
+
+    /** TorBox API key, encrypted. */
+    var torboxKey: String?
+        get() = Vault.open(prefs.getString(K_TORBOX, null))?.takeIf { it.isNotBlank() }
+        set(v) {
+            prefs.edit().apply { if (v.isNullOrBlank()) remove(K_TORBOX) else putString(K_TORBOX, Vault.seal(v.trim())) }.apply()
         }
 
     /** The user chose to watch scores without an IPTV provider for now. */
@@ -157,6 +179,9 @@ class AccountPrefs(context: Context, val accountId: String) {
     companion object {
         fun prefsName(accountId: String) = "acct_$accountId"
         private const val K_IPTV = "iptv"
+        private const val K_PROVIDERS = "providers"
+        private const val K_ADDONS = "addons"
+        private const val K_TORBOX = "torbox"
         private const val K_SKIPPED = "provider_skipped"
         private const val K_ONBOARDED = "onboarded"
         private const val K_FORMAT = "stream_format"
@@ -253,11 +278,36 @@ class ProfilePrefs(context: Context, accountId: String, profileId: String) {
     var captions: Boolean by prefs.boolean(K_CAPTIONS, false)
     var autoplayNext: Boolean by prefs.boolean(K_AUTOPLAY, true)
 
-    /** IPTV-style zapping: D-pad up/down changes channel while watching (YouTube TV shows controls instead). */
-    var zapWithDpad: Boolean by prefs.boolean(K_ZAP_DPAD, false)
+    /**
+     * Seconds the score bug and score alerts lag behind live scores. IPTV streams run behind the
+     * real broadcast, so live data would otherwise spoil plays before they're seen.
+     */
+    var scoreDelaySec: Int
+        get() = prefs.getInt(K_SCORE_DELAY, 60)
+        set(v) = prefs.edit().putInt(K_SCORE_DELAY, v).apply()
+
+    /** Live video behind the menus, like YouTube TV: "sound", "muted" or "off". */
+    var backgroundVideo: String by prefs.string(K_BG_VIDEO, "sound")
 
     /** Live guide filter: "all", "sports", "favorites", "recent" or "group:<name>". */
     var guideFilter: String by prefs.string(K_GUIDE_FILTER, "sports")
+
+    /** How subtitles look ([SubtitleStyle.encode]). */
+    var subtitleStyle: SubtitleStyle
+        get() = SubtitleStyle.decode(prefs.getString(K_SUB_STYLE, null))
+        set(v) = prefs.edit().putString(K_SUB_STYLE, v.encode()).apply()
+
+    /** Subtitle language picked automatically (ISO 639-1); the TV's language until changed. */
+    var subtitleLanguage: String
+        get() = prefs.getString(K_SUB_LANG, null) ?: java.util.Locale.getDefault().language.ifBlank { "en" }
+        set(v) = prefs.edit().putString(K_SUB_LANG, v).apply()
+
+    /** Size of the player's round buttons: "small", "medium" or "large". */
+    var playerButtons: String by prefs.string(K_PLAYER_BUTTONS, "medium")
+
+    var recentOnDemandSearches: List<String>
+        get() = readStrings(K_RECENT_OD_SEARCHES)
+        set(v) = writeStrings(K_RECENT_OD_SEARCHES, v.take(8))
 
     private fun readStrings(key: String): List<String> = runCatching {
         val arr = JSONArray(prefs.getString(key, "[]"))
@@ -292,8 +342,13 @@ class ProfilePrefs(context: Context, accountId: String, profileId: String) {
         private const val K_ALERTS = "score_alerts"
         private const val K_CAPTIONS = "captions"
         private const val K_AUTOPLAY = "autoplay_next"
-        private const val K_ZAP_DPAD = "zap_dpad"
+        private const val K_SCORE_DELAY = "score_delay_sec"
+        private const val K_BG_VIDEO = "background_video"
         private const val K_GUIDE_FILTER = "guide_filter"
+        private const val K_SUB_STYLE = "subtitle_style"
+        private const val K_SUB_LANG = "subtitle_language"
+        private const val K_PLAYER_BUTTONS = "player_buttons"
+        private const val K_RECENT_OD_SEARCHES = "recent_od_searches"
     }
 }
 

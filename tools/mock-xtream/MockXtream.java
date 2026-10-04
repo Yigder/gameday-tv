@@ -69,7 +69,11 @@ public class MockXtream {
         Map<String, String> q = query(ex.getRequestURI().getRawQuery());
         System.out.println(ex.getRequestMethod() + " " + path + " " + q.getOrDefault("action", ""));
         try {
-            if (path.equals("/player_api.php")) {
+            if (path.equals("/playlist.m3u")) {
+                send(ex, 200, "audio/x-mpegurl", playlist());
+            } else if (path.startsWith("/addon/")) {
+                addon(ex, path.substring("/addon/".length()));
+            } else if (path.equals("/player_api.php")) {
                 if (!USER.equals(q.get("username")) || !PASS.equals(q.get("password"))) {
                     json(ex, "{\"user_info\":{\"auth\":0}}");
                     return;
@@ -163,6 +167,128 @@ public class MockXtream {
             }
             default:
                 return "[]";
+        }
+    }
+
+    /** A second provider: a plain M3U playlist (no login) with a few more channels. */
+    static String playlist() {
+        String[][] ch = {
+            {"UK| SKY SPORTS MAIN EVENT", "UK Sports", "/live/m3u/501.m3u8"},
+            {"UK| SKY SPORTS GOLF", "UK Sports", "/live/m3u/502.m3u8"},
+            {"CA| TSN 1", "Canada Sports", "/live/m3u/503.m3u8"},
+            {"CA| CBC", "Canada", "/live/m3u/504.m3u8"},
+        };
+        StringBuilder sb = new StringBuilder("#EXTM3U\n");
+        for (String[] c : ch) {
+            sb.append("#EXTINF:-1 tvg-id=\"\" group-title=\"").append(c[1]).append("\",").append(c[0]).append('\n')
+                .append("http://127.0.0.1:8085").append(c[2]).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /**
+     * A fake Stremio add-on (catalog, details and sources). Its sources also answer for Cinemeta's
+     * "tt" titles, so On Demand can be tried end to end with sample videos.
+     */
+    static void addon(HttpExchange ex, String rest) throws IOException {
+        ex.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+        if (rest.equals("manifest.json")) {
+            json(ex, "{\"id\":\"dev.gameday.mock\",\"version\":\"1.0.0\",\"name\":\"Mock Streams\",\"description\":\"Sample sources for testing.\","
+                + "\"types\":[\"movie\",\"series\"],\"idPrefixes\":[\"tt\",\"mk\"],"
+                + "\"resources\":[\"catalog\",{\"name\":\"meta\",\"types\":[\"movie\",\"series\"],\"idPrefixes\":[\"mk\"]},\"stream\",\"subtitles\"],"
+                + "\"catalogs\":[{\"type\":\"movie\",\"id\":\"mock\",\"name\":\"Open Movies\",\"extra\":[{\"name\":\"search\"},{\"name\":\"skip\"}]},"
+                + "{\"type\":\"series\",\"id\":\"mockshows\",\"name\":\"Open Shorts\"}]}");
+            return;
+        }
+        String[] parts = rest.replace(".json", "").split("/");
+        String resource = parts[0];
+        String type = parts.length > 1 ? parts[1] : "";
+        String id = parts.length > 2 ? URLDecoder.decode(parts[2], StandardCharsets.UTF_8) : "";
+        String extra = parts.length > 3 ? URLDecoder.decode(parts[3], StandardCharsets.UTF_8) : "";
+        switch (resource) {
+            case "catalog": {
+                if (extra.contains("skip=")) { json(ex, "{\"metas\":[]}"); return; }
+                StringBuilder sb = new StringBuilder("{\"metas\":[");
+                if (type.equals("series")) {
+                    sb.append("{\"id\":\"mks1\",\"type\":\"series\",\"name\":\"Open Shorts\",\"poster\":\"").append(BBB_POSTER)
+                        .append("\",\"background\":\"").append(TOS_IMAGE).append("\",\"releaseInfo\":\"2010\",\"description\":\"Open movies as a show.\"}");
+                } else {
+                    String q = extra.startsWith("search=") ? extra.substring(7).toLowerCase() : "";
+                    boolean first = true;
+                    for (String[] m : MOVIES) {
+                        if (!q.isEmpty() && !m[1].toLowerCase().contains(q)) continue;
+                        if (!first) sb.append(',');
+                        first = false;
+                        sb.append("{\"id\":\"mk").append(m[0]).append("\",\"type\":\"movie\",\"name\":\"").append(m[1]).append("\",\"poster\":\"").append(m[4])
+                            .append("\",\"background\":\"").append(m[4]).append("\",\"releaseInfo\":\"").append(m[5]).append("\",\"imdbRating\":\"").append(m[6])
+                            .append("\",\"genres\":[\"Animation\"],\"description\":\"An open movie, used as sample content.\"}");
+                    }
+                }
+                json(ex, sb.append("]}").toString());
+                return;
+            }
+            case "meta": {
+                if (id.equals("mks1")) {
+                    StringBuilder v = new StringBuilder();
+                    for (int s = 1; s <= 2; s++) for (int e = 1; e <= 3; e++) {
+                        if (v.length() > 0) v.append(',');
+                        v.append("{\"id\":\"mks1:").append(s).append(':').append(e).append("\",\"name\":\"Short ").append(s).append('.').append(e)
+                            .append("\",\"season\":").append(s).append(",\"episode\":").append(e).append(",\"released\":\"2010-0").append(s).append("-0").append(e)
+                            .append("T00:00:00.000Z\",\"thumbnail\":\"").append(MOVIES[(s * 3 + e) % MOVIES.length][4]).append("\",\"overview\":\"Sample episode.\"}");
+                    }
+                    json(ex, "{\"meta\":{\"id\":\"mks1\",\"type\":\"series\",\"name\":\"Open Shorts\",\"poster\":\"" + BBB_POSTER + "\",\"background\":\"" + TOS_IMAGE
+                        + "\",\"releaseInfo\":\"2010\",\"description\":\"Open movies as a show.\",\"videos\":[" + v + "]}}");
+                    return;
+                }
+                for (String[] m : MOVIES) if (("mk" + m[0]).equals(id)) {
+                    json(ex, "{\"meta\":{\"id\":\"" + id + "\",\"type\":\"movie\",\"name\":\"" + m[1] + "\",\"poster\":\"" + m[4] + "\",\"background\":\"" + m[4]
+                        + "\",\"releaseInfo\":\"" + m[5] + "\",\"imdbRating\":\"" + m[6] + "\",\"runtime\":\"10 min\",\"genres\":[\"Animation\"],"
+                        + "\"cast\":[\"Open Movie Project\"],\"director\":[\"Blender Foundation\"],\"description\":\"An open movie, used as sample content.\"}}");
+                    return;
+                }
+                json(ex, "{\"meta\":null}");
+                return;
+            }
+            case "stream": {
+                int pick = Math.floorMod(id.hashCode(), MOVIES.length);
+                json(ex, "{\"streams\":["
+                    + "{\"name\":\"Mock 1080p\",\"title\":\"Sample.1080p.mp4\\n💾 5 MB\",\"url\":\"" + MOVIES[pick][3] + "\",\"behaviorHints\":{\"bingeGroup\":\"mock-1080\"}},"
+                    + "{\"name\":\"Mock 720p\",\"title\":\"Sample.720p.mp4 (needs a header)\",\"url\":\"http://127.0.0.1:8085/addon/hdr/" + pick + "\","
+                    + "\"behaviorHints\":{\"proxyHeaders\":{\"request\":{\"X-Mock-Key\":\"ok\"}}}},"
+                    + "{\"name\":\"Mock torrent\",\"title\":\"Sample.2160p.mkv 💾 4.2 GB\",\"infoHash\":\"0123456789abcdef0123456789abcdef01234567\",\"fileIdx\":0}"
+                    + "]}");
+                return;
+            }
+            case "subtitles": {
+                // Two languages: SubRip and WebVTT files, served below.
+                json(ex, "{\"subtitles\":[{\"id\":\"mock-en\",\"url\":\"http://127.0.0.1:8085/addon/sub/en.srt\",\"lang\":\"eng\"},"
+                    + "{\"id\":\"mock-es\",\"url\":\"http://127.0.0.1:8085/addon/sub/es.vtt\",\"lang\":\"spa\"}]}");
+                return;
+            }
+            case "sub": {
+                // A line every 3 seconds for 15 minutes, saying where it should appear.
+                boolean vtt = type.endsWith(".vtt");
+                String word = type.startsWith("es") ? "Subtítulo de prueba" : "Test subtitle";
+                StringBuilder sb = new StringBuilder(vtt ? "WEBVTT\n\n" : "");
+                for (int i = 0; i < 300; i++) {
+                    int s = i * 3;
+                    String a = String.format("%02d:%02d:%02d%s000", s / 3600, s / 60 % 60, s % 60, vtt ? "." : ",");
+                    String b = String.format("%02d:%02d:%02d%s500", (s + 2) / 3600, (s + 2) / 60 % 60, (s + 2) % 60, vtt ? "." : ",");
+                    if (!vtt) sb.append(i + 1).append('\n');
+                    sb.append(a).append(" --> ").append(b).append('\n').append(word).append(" ").append(i + 1)
+                        .append("\n<i>at ").append(s / 60).append(':').append(String.format("%02d", s % 60)).append("</i>\n\n");
+                }
+                send(ex, 200, vtt ? "text/vtt; charset=utf-8" : "application/x-subrip; charset=utf-8", sb.toString());
+                return;
+            }
+            case "hdr": {
+                // Only plays when the add-on's header is sent.
+                if (!"ok".equals(ex.getRequestHeaders().getFirst("X-Mock-Key"))) { send(ex, 403, "text/plain", "missing header"); return; }
+                redirect(ex, MOVIES[Integer.parseInt(type.isEmpty() ? "0" : type) % MOVIES.length][3]);
+                return;
+            }
+            default:
+                send(ex, 404, "text/plain", "unknown add-on resource");
         }
     }
 

@@ -94,21 +94,28 @@ private fun StepFrame(
     }
 }
 
-/** IPTV login: Xtream Codes or an M3U playlist. Used in setup and from Settings. */
+/** IPTV login: Xtream Codes or an M3U playlist. Used in setup and from Settings (add or edit one). */
 @Composable
-fun ProviderScreen(vm: AppViewModel, onboarding: Boolean) {
-    val existing = vm.providerAccount
-    var mode by rememberSaveable { mutableStateOf(if (existing is IptvAccount.M3u) "m3u" else "xtream") }
-    var server by rememberSaveable { mutableStateOf((existing as? IptvAccount.Xtream)?.server.orEmpty()) }
-    var user by rememberSaveable { mutableStateOf((existing as? IptvAccount.Xtream)?.username.orEmpty()) }
+fun ProviderScreen(vm: AppViewModel, onboarding: Boolean, editId: String? = null) {
+    val entry = vm.providers.firstOrNull { it.id == editId }
+    val existing = entry?.account
+    // Plain remember: the form starts fresh each time it opens (it holds logins).
+    var name by remember { mutableStateOf(entry?.name.orEmpty()) }
+    var mode by remember { mutableStateOf(if (existing is IptvAccount.M3u) "m3u" else "xtream") }
+    var server by remember { mutableStateOf((existing as? IptvAccount.Xtream)?.server.orEmpty()) }
+    var user by remember { mutableStateOf((existing as? IptvAccount.Xtream)?.username.orEmpty()) }
     var pass by remember { mutableStateOf((existing as? IptvAccount.Xtream)?.password.orEmpty()) }
-    var m3u by rememberSaveable { mutableStateOf((existing as? IptvAccount.M3u)?.url.orEmpty()) }
-    var epgUrl by rememberSaveable { mutableStateOf((existing as? IptvAccount.M3u)?.epgUrl.orEmpty()) }
+    var m3u by remember { mutableStateOf((existing as? IptvAccount.M3u)?.url.orEmpty()) }
+    var epgUrl by remember { mutableStateOf((existing as? IptvAccount.M3u)?.epgUrl.orEmpty()) }
     var submitted by remember { mutableStateOf(false) }
     var formError by remember { mutableStateOf<String?>(null) }
-    val legacyLabel = vm.legacyProviderLabel
+    // Offer the 1.x login only when setting up the first provider.
+    val legacyLabel = vm.legacyProviderLabel.takeIf { editId == null && vm.providers.isEmpty() }
     val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) { first.requestFocusSafely(200) }
+    LaunchedEffect(Unit) {
+        vm.resetProviderTest()
+        first.requestFocusSafely(200)
+    }
 
     val done: () -> Unit = { if (onboarding) vm.finishOnboardingStep(0) else vm.back() }
 
@@ -130,10 +137,10 @@ fun ProviderScreen(vm: AppViewModel, onboarding: Boolean) {
             XtreamSource.fromPlaylistUrl(m3u) ?: IptvAccount.M3u(m3u.trim(), epgUrl.trim().ifBlank { null })
         }
         submitted = true
-        vm.connectProvider(account, done)
+        vm.saveProvider(editId, name, account, done)
     }
 
-    val status = vm.iptv
+    val status = vm.providerTest
     val connecting = submitted && status is IptvStatus.Loading
     val failure = (status as? IptvStatus.Failed)?.message?.takeIf { submitted }
 
@@ -142,7 +149,14 @@ fun ProviderScreen(vm: AppViewModel, onboarding: Boolean) {
             Logo(22.dp)
             Spacer(Modifier.height(24.dp))
             if (onboarding) Text("Step 1 of 3", fontSize = 13.sp, color = AppColors.TextDim)
-            Text("Connect your TV provider", fontSize = 30.sp, fontWeight = FontWeight.Medium)
+            Text(
+                when {
+                    entry != null -> "Edit ${entry.name}"
+                    vm.providers.isNotEmpty() -> "Add another provider"
+                    else -> "Connect your TV provider"
+                },
+                fontSize = 30.sp, fontWeight = FontWeight.Medium,
+            )
             Spacer(Modifier.height(10.dp))
             Text(
                 "Sign in with the details your IPTV provider gave you. GameDay TV uses them to show your channels, guide, " +
@@ -173,6 +187,10 @@ fun ProviderScreen(vm: AppViewModel, onboarding: Boolean) {
                 Chip("M3U playlist", mode == "m3u", { mode = "m3u" })
             }
             Spacer(Modifier.height(16.dp))
+            if (!onboarding) {
+                TvTextField(name, { name = it }, label = "Name (optional)", placeholder = "Shown in Settings and the guide")
+                Spacer(Modifier.height(10.dp))
+            }
             if (mode == "xtream") {
                 TvTextField(server, { server = it }, label = "Server URL", placeholder = "http://provider.example:8080", keyboardType = KeyboardType.Uri)
                 Spacer(Modifier.height(10.dp))
@@ -217,11 +235,11 @@ fun SportsPicker(vm: AppViewModel, modifier: Modifier = Modifier, focusFirst: Bo
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(4.dp, 4.dp, 4.dp, 32.dp),
     ) {
-        items(Leagues.everything, key = { it.key }) { league ->
-            val on = league.key in vm.enabledLeagues
+        items(Leagues.picks, key = { it.key }) { league ->
+            val on = vm.isSportEnabled(league)
             FocusSurface(
-                onClick = { vm.setLeagueEnabled(league.key, !on) },
-                modifier = Modifier.fillMaxWidth().height(64.dp).then(if (league == Leagues.everything.first()) Modifier.focusRequester(first) else Modifier),
+                onClick = { vm.setSportEnabled(league, !on) },
+                modifier = Modifier.fillMaxWidth().height(64.dp).then(if (league == Leagues.picks.first()) Modifier.focusRequester(first) else Modifier),
                 containerColor = if (on) Color(0x33FFFFFF) else Color(0x14FFFFFF),
             ) {
                 Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {

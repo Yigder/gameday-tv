@@ -37,6 +37,8 @@ data class Channel(
     val epgId: String? = null,
     /** Days of catch-up (replay) the provider keeps for this channel; 0 when it has none. */
     val archiveDays: Int = 0,
+    /** The [ProviderEntry] this channel comes from. */
+    val providerId: String = "",
 )
 
 class IptvCatalog(val groups: List<String>, val channels: List<Channel>) {
@@ -297,10 +299,12 @@ data class Profile(val id: String, val name: String, val color: Int) {
 
 // ---------- Library ----------
 
-enum class SavedKind { MOVIE, SERIES }
+/** MOVIE / SERIES are from the IPTV provider; ADDON_* are from streaming add-ons (id = meta id). */
+enum class SavedKind { MOVIE, SERIES, ADDON_MOVIE, ADDON_SERIES }
 
 data class SavedItem(val kind: SavedKind, val id: String, val title: String, val image: String?, val addedAt: Long) {
     val key: String get() = "${kind.name}:$id"
+    val isMovie: Boolean get() = kind == SavedKind.MOVIE || kind == SavedKind.ADDON_MOVIE
 }
 
 /** Where the viewer stopped in something they can resume (movie, episode, recording). */

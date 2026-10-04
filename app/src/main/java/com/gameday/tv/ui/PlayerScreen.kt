@@ -3,6 +3,9 @@ package com.gameday.tv.ui
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -29,6 +32,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -67,6 +71,7 @@ import com.gameday.tv.data.Channel
 import com.gameday.tv.data.GameState
 import com.gameday.tv.data.GameStats
 import com.gameday.tv.data.StreamFormat
+import com.gameday.tv.data.Subtitles
 import com.gameday.tv.ui.theme.AppColors
 import kotlinx.coroutines.delay
 import java.io.File
@@ -79,7 +84,7 @@ internal val SCORE_KEYS = setOf(Key.Info, Key.Guide, Key.ProgramRed, Key.Program
 /** True on the first auto-repeat of a held key, i.e. a long press. */
 internal fun KeyEvent.isLongPressRepeat(): Boolean = nativeKeyEvent.repeatCount == 1
 
-private enum class Panel { None, Stats, Settings }
+private enum class Panel { None, Stats, Settings, SubtitleStyle }
 
 /** What the player is showing, flattened from the [PlayRequest]. */
 private data class Now(
@@ -90,6 +95,7 @@ private data class Now(
     val channel: Channel?,
     val startAt: Long,
     val resumeItem: VodItem?,
+    val headers: Map<String, String> = emptyMap(),
 )
 
 /**
@@ -104,18 +110,70 @@ fun PlayerScreen(vm: AppViewModel) {
         return
     }
     val now = remember(req) { describe(vm, req) }
-    val stream = rememberStreamController()
+    // The shared player: a channel already playing behind the menus continues without restarting.
+    val stream = vm.mainStream
+    val decoding = vm.decoderMode(DecoderSlot.PLAYER)
+    // Before load(), so the first start already uses the chosen decoder.
+    LaunchedEffect(stream, decoding) { stream.applyDecoderMode(decoding) }
     LaunchedEffect(now.key, now.urls) {
-        stream.load(now.key, now.urls, now.startAt)
-        now.channel?.let { if (req is PlayRequest.Live) vm.noteRecent(it) }
+        stream.volume = 1f
+        stream.load(now.key, now.urls, now.startAt, now.headers)
+        if (req is PlayRequest.Live) now.channel?.let { vm.noteRecent(it) }
+        vm.noteWatching(if (req is PlayRequest.Live) now.channel else null)
     }
-    LaunchedEffect(vm.captions, stream) {
+    // ---- subtitles: the stream's own captions, or a file from a subtitle add-on ----
+    val resumeItem = now.resumeItem
+    val subs = remember(now.key) { PlayerSubtitles() }
+    LaunchedEffect(vm.captions, stream, subs.chosen, vm.subtitleLanguage) {
+        // An add-on file replaces the stream's captions, so they don't show twice.
         stream.player.trackSelectionParameters = stream.player.trackSelectionParameters.buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !vm.captions).build()
+            .setPreferredTextLanguage(vm.subtitleLanguage)
+            .setSelectUndeterminedTextLanguage(true)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !vm.captions || subs.chosen != null).build()
+    }
+    val subRequest = resumeItem?.subtitles
+    if (subRequest != null) {
+        LaunchedEffect(now.key) {
+            if (!vm.addons.hasSubtitleAddons && subRequest.fromSource.isEmpty()) return@LaunchedEffect
+            subs.searching = true
+            subs.tracks = Subtitles.sortTracks(vm.addons.subtitles(subRequest), vm.subtitleLanguage)
+            subs.searching = false
+        }
+    }
+    // Captions on: use the stream's captions in the chosen language, else an add-on file in it.
+    LaunchedEffect(vm.captions, subs.tracks, stream.tracks, vm.subtitleLanguage) {
+        if (!vm.captions || subs.decided || subs.chosen != null) return@LaunchedEffect
+        val embedded = stream.tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+        val ownMatch = embedded.firstOrNull { g -> Subtitles.sameLanguage(g.getTrackFormat(0).language, vm.subtitleLanguage) }
+        when {
+            ownMatch != null -> {
+                subs.decided = true
+                stream.player.trackSelectionParameters = stream.player.trackSelectionParameters.buildUpon()
+                    .setOverrideForType(TrackSelectionOverride(ownMatch.mediaTrackGroup, 0)).build()
+            }
+            else -> subs.tracks.firstOrNull { Subtitles.sameLanguage(it.lang, vm.subtitleLanguage) }?.let {
+                subs.decided = true
+                subs.chosen = it
+            }
+        }
+    }
+    LaunchedEffect(subs.chosen) {
+        val track = subs.chosen ?: run { subs.cues = emptyList(); return@LaunchedEffect }
+        subs.loading = true
+        subs.cues = emptyList()
+        try {
+            subs.cues = vm.addons.loadSubtitle(track)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            vm.showMessage("Couldn't load those subtitles: ${vm.friendly(e)}")
+            subs.chosen = null
+        } finally {
+            subs.loading = false
+        }
     }
 
     // ---- remember where movies, episodes and recordings were left ----
-    val resumeItem = now.resumeItem
     if (resumeItem != null) {
         LaunchedEffect(resumeItem.key) {
             while (true) {
@@ -130,18 +188,26 @@ fun PlayerScreen(vm: AppViewModel) {
     LaunchedEffect(stream.ended) {
         if (!stream.ended) return@LaunchedEffect
         resumeItem?.let { vm.saveResume(it, 0, 0) }
-        if (!(vm.autoplayNext && vm.nextVod())) vm.back()
+        val next = resumeItem?.next
+        when {
+            vm.autoplayNext && vm.nextVod() -> Unit
+            vm.autoplayNext && next != null -> vm.addons.playNext(next)
+            else -> vm.back()
+        }
     }
 
     // ---- sports context: the event we came from, or one this channel looks like it's showing ----
     val liveChannel = (req as? PlayRequest.Live)?.current
-    val linkedGame = remember(req, vm.games) {
+    val liveGame = remember(req, vm.games) {
         (req as? PlayRequest.Live)?.eventId?.let { vm.gameById(it) } ?: liveChannel?.let { vm.liveGameFor(it) }
     }
-    val linkedTournament = remember(req, vm.tournaments) {
-        if (linkedGame != null) null
+    val liveTournament = remember(req, vm.tournaments) {
+        if (liveGame != null) null
         else (req as? PlayRequest.Live)?.eventId?.let { vm.tournamentById(it) } ?: liveChannel?.let { vm.liveTournamentFor(it) }
     }
+    // The score bug follows the stream, which runs behind the live scoreboard.
+    val linkedGame = vm.delayedGame(liveGame)
+    val linkedTournament = vm.delayedTournament(liveTournament)
     val bug = rememberBugState(
         key = now.key,
         scoreKey = scoreKeyOf(linkedGame, linkedTournament),
@@ -173,7 +239,7 @@ fun PlayerScreen(vm: AppViewModel) {
             else -> rootFocus.requestFocusSafely(40)
         }
     }
-    BackHandler(enabled = panel != Panel.None) { panel = Panel.None; showControls() }
+    BackHandler(enabled = panel != Panel.None) { if (panel == Panel.SubtitleStyle) panel = Panel.Settings else { panel = Panel.None; showControls() } }
     BackHandler(enabled = panel == Panel.None && controls) { controls = false }
 
     val live = req is PlayRequest.Live
@@ -223,8 +289,13 @@ fun PlayerScreen(vm: AppViewModel) {
                 }
                 if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
                 when (ev.key) {
-                    Key.DirectionUp -> { if (vm.zapWithDpad && live) vm.zap(+1) else showControls(); true }
-                    Key.DirectionDown -> { if (vm.zapWithDpad && live) vm.zap(-1) else showControls(); true }
+                    // Up only shows or hides the score bug (nothing else), like ScoreBox.
+                    Key.DirectionUp -> {
+                        if (linkedGame != null || linkedTournament != null) bug.toggle()
+                        else vm.showMessage("No live score for this channel")
+                        true
+                    }
+                    Key.DirectionDown -> { showControls(); true }
                     Key.DirectionLeft -> { if (stream.seekable) stream.seekBy(-10_000); showControls(); true }
                     Key.DirectionRight -> { if (stream.seekable) stream.seekBy(30_000); showControls(); true }
                     Key.Menu -> { panel = Panel.Settings; true }
@@ -239,7 +310,27 @@ fun PlayerScreen(vm: AppViewModel) {
                 )
             },
     ) {
-        VideoSurface(stream, Modifier.fillMaxSize(), showSubtitles = vm.captions)
+        // Captions are drawn by SubtitleOverlay (in the viewer's style), not by the video view.
+        VideoSurface(stream, Modifier.fillMaxSize(), showSubtitles = false)
+        if (vm.captions) {
+            var addonLines by remember(subs) { mutableStateOf<List<String>>(emptyList()) }
+            if (subs.chosen != null) {
+                LaunchedEffect(subs.cues, subs.delayMs) {
+                    while (true) {
+                        val at = stream.player.currentPosition - subs.delayMs
+                        val lines = Subtitles.activeAt(subs.cues, at).map { it.text }
+                        if (lines != addonLines) addonLines = lines
+                        delay(80)
+                    }
+                }
+            }
+            val own = stream.cues
+            SubtitleOverlay(
+                lines = if (subs.chosen != null) addonLines else textOfCues(own),
+                bitmaps = if (subs.chosen != null) emptyList() else own.filter { it.bitmap != null },
+                style = vm.subtitleStyle,
+            )
+        }
 
         if (stream.buffering && stream.error == null) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -270,7 +361,9 @@ fun PlayerScreen(vm: AppViewModel) {
             }
         }
 
-        EventBug(linkedGame, linkedTournament, bug, Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 32.dp))
+        // With the controls up, the bug moves below the channel name and clock.
+        val bugTop by animateDpAsState(if (controls && panel == Panel.None) 92.dp else 24.dp, tween(260, easing = FastOutSlowInEasing), label = "bugTop")
+        EventBug(linkedGame, linkedTournament, bug, Modifier.align(Alignment.TopEnd).padding(top = bugTop, end = 32.dp))
 
         AnimatedVisibility(
             visible = controls && panel == Panel.None,
@@ -288,6 +381,7 @@ fun PlayerScreen(vm: AppViewModel) {
                 onStats = { panel = Panel.Stats },
                 onSettings = { panel = Panel.Settings },
                 onPoke = ::poke,
+                subs = subs,
             )
         }
 
@@ -306,7 +400,16 @@ fun PlayerScreen(vm: AppViewModel) {
             exit = slideOutHorizontally { it },
             modifier = Modifier.align(Alignment.CenterEnd),
         ) {
-            SettingsPanel(vm, stream, live)
+            SettingsPanel(vm, stream, live, subs, subRequest != null, onStyle = { panel = Panel.SubtitleStyle })
+        }
+
+        AnimatedVisibility(
+            visible = panel == Panel.SubtitleStyle,
+            enter = slideInHorizontally { it },
+            exit = slideOutHorizontally { it },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        ) {
+            SubtitleStylePanel(vm)
         }
     }
 }
@@ -323,7 +426,7 @@ private fun describe(vm: AppViewModel, req: PlayRequest): Now = when (req) {
     )
     is PlayRequest.Vod -> {
         val item = req.current
-        Now(item.key, listOf(item.url), item.title, item.subtitle, null, vm.resumeFor(item.key)?.positionMs ?: 0, item)
+        Now(item.key, listOf(item.url), item.title, item.subtitle, null, vm.resumeFor(item.key)?.positionMs ?: 0, item, item.headers)
     }
     is PlayRequest.Rec -> {
         val r = req.recording
@@ -348,8 +451,10 @@ private fun Controls(
     onStats: () -> Unit,
     onSettings: () -> Unit,
     onPoke: () -> Unit,
+    subs: PlayerSubtitles,
 ) {
     val channel = now.channel
+    val (btn, playBtn) = playerButtonSizes(vm.playerButtons)
     // Positions are polled while the controls are up.
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
@@ -432,11 +537,12 @@ private fun Controls(
             }
             Spacer(Modifier.height(14.dp))
 
-            // Buttons.
+            // Buttons (Settings › Playback › Player buttons sets their size).
+            CompositionLocalProvider(LocalButtonSize provides btn) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.Top) {
                 if (seekable) IconCircleButton(Icons.Rewind, "Back 10s", { stream.seekBy(-10_000) })
                 IconCircleButton(if (playing) Icons.Pause else Icons.Play, if (playing) "Pause" else "Play", { stream.togglePause() },
-                    Modifier.focusRequester(playFocus), size = 60.dp)
+                    Modifier.focusRequester(playFocus), size = playBtn)
                 if (seekable) IconCircleButton(Icons.Forward, "Forward 30s", { stream.seekBy(30_000) })
                 when (req) {
                     is PlayRequest.Live -> {
@@ -460,12 +566,23 @@ private fun Controls(
                     else -> Unit
                 }
                 if (hasStats) IconCircleButton(Icons.Stats, "Stats", onStats)
-                IconCircleButton(Icons.Captions, if (vm.captions) "Captions on" else "Captions off", { vm.updateCaptions(!vm.captions) }, active = vm.captions)
+                IconCircleButton(Icons.Captions, if (vm.captions) "Captions on" else "Captions off", {
+                    val on = !vm.captions
+                    vm.updateCaptions(on)
+                    val any = stream.tracks.groups.any { it.type == C.TRACK_TYPE_TEXT } || subs.tracks.isNotEmpty()
+                    if (on && !any && !subs.searching) {
+                        vm.showMessage(
+                            if (now.resumeItem?.subtitles != null && !vm.addons.hasSubtitleAddons) "No captions in this video. Add a subtitle add-on (like OpenSubtitles) in Settings › Add-ons."
+                            else "No captions found for this video",
+                        )
+                    }
+                }, active = vm.captions)
                 IconCircleButton(Icons.Settings, "Settings", onSettings)
                 if (channel != null && req is PlayRequest.Live) {
                     val fav = vm.isFavoriteChannel(channel.id)
                     IconCircleButton(Icons.Star, if (fav) "Favorite" else "Add favorite", { vm.toggleFavoriteChannel(channel) }, active = fav)
                 }
+            }
             }
 
             // More to watch: the zap list for live TV, the episode queue for shows.
@@ -625,10 +742,10 @@ private fun StatsPanel(vm: AppViewModel, game: com.gameday.tv.data.Game) {
 }
 
 @Composable
-private fun SettingsPanel(vm: AppViewModel, stream: StreamController, live: Boolean) {
+private fun SettingsPanel(vm: AppViewModel, stream: StreamController, live: Boolean, subs: PlayerSubtitles, addonTitle: Boolean, onStyle: () -> Unit) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { first.requestFocusSafely(150) }
-    val tracks = stream.player.currentTracks
+    val tracks = stream.tracks
     val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
     val text = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
     val video = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
@@ -641,11 +758,21 @@ private fun SettingsPanel(vm: AppViewModel, stream: StreamController, live: Bool
         item(key = "zoom") {
             SettingRow("Picture size", { stream.zoom = !stream.zoom }, Modifier.focusRequester(first), value = if (stream.zoom) "Zoom to fill" else "Fit")
         }
+        item(key = "dec") {
+            val mode = vm.decoderMode(DecoderSlot.PLAYER)
+            SettingRow("Video decoding", { vm.setDecoderMode(DecoderSlot.PLAYER, mode.next()) },
+                subtitle = decodingStatus(mode, stream.softwareDecoding), value = mode.label)
+        }
         if (live) {
             item(key = "format") {
                 SettingRow("Stream format", { vm.updateStreamFormat(if (vm.streamFormat == StreamFormat.TS) StreamFormat.HLS else StreamFormat.TS) },
                     subtitle = "Switch if this channel stutters or won't play", value = vm.streamFormat.label)
             }
+        }
+        item(key = "buttons") {
+            val sizes = listOf("small", "medium", "large")
+            SettingRow("Button size", { vm.updatePlayerButtons(sizes[(sizes.indexOf(vm.playerButtons) + 1) % sizes.size]) },
+                value = vm.playerButtons.replaceFirstChar { it.uppercase() })
         }
         if (audio.size > 1) {
             item(key = "audio-h") { PanelHeader("Audio") }
@@ -653,7 +780,7 @@ private fun SettingsPanel(vm: AppViewModel, stream: StreamController, live: Bool
                 val f = g.getTrackFormat(0)
                 item(key = "a$i") {
                     SettingRow(
-                        f.label ?: f.language?.let { java.util.Locale.forLanguageTag(it).displayLanguage } ?: "Track ${i + 1}",
+                        f.label ?: f.language?.let { Subtitles.languageName(it) } ?: "Track ${i + 1}",
                         {
                             stream.player.trackSelectionParameters = stream.player.trackSelectionParameters.buildUpon()
                                 .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0)).build()
@@ -663,25 +790,63 @@ private fun SettingsPanel(vm: AppViewModel, stream: StreamController, live: Bool
                 }
             }
         }
-        if (text.isNotEmpty()) {
-            item(key = "cc-h") { PanelHeader("Captions") }
-            item(key = "cc-off") { SettingRow("Off", { vm.updateCaptions(false) }, checked = !vm.captions) }
-            text.forEachIndexed { i, g ->
-                val f = g.getTrackFormat(0)
-                item(key = "t$i") {
-                    SettingRow(
-                        f.label ?: f.language?.let { java.util.Locale.forLanguageTag(it).displayLanguage } ?: "Captions ${i + 1}",
-                        {
-                            vm.updateCaptions(true)
-                            stream.player.trackSelectionParameters = stream.player.trackSelectionParameters.buildUpon()
-                                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                                .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0)).build()
-                        },
-                        checked = vm.captions && g.isSelected,
-                    )
-                }
+
+        // ---- subtitles: the stream's own, then add-on files (preferred language first) ----
+        item(key = "cc-h") { PanelHeader("Subtitles") }
+        item(key = "cc-off") { SettingRow("Off", { vm.updateCaptions(false) }, checked = !vm.captions) }
+        text.forEachIndexed { i, g ->
+            val f = g.getTrackFormat(0)
+            item(key = "t$i") {
+                SettingRow(
+                    f.label ?: f.language?.let { Subtitles.languageName(it) } ?: "Captions ${i + 1}",
+                    {
+                        vm.updateCaptions(true)
+                        subs.decided = true
+                        subs.chosen = null
+                        stream.player.trackSelectionParameters = stream.player.trackSelectionParameters.buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                            .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0)).build()
+                    },
+                    subtitle = "In the video",
+                    checked = vm.captions && subs.chosen == null && g.isSelected,
+                )
             }
         }
+        // Several files in one language are numbered: "English 2".
+        val counts = HashMap<String, Int>()
+        subs.tracks.forEach { t ->
+            val n = (counts[t.language] ?: 0) + 1
+            counts[t.language] = n
+            item(key = "s:" + t.url) {
+                SettingRow(
+                    if (n > 1) "${t.language} $n" else t.language,
+                    {
+                        vm.updateCaptions(true)
+                        subs.decided = true
+                        subs.chosen = t
+                    },
+                    subtitle = if (subs.chosen == t && subs.loading) "Loading…" else t.addon,
+                    checked = vm.captions && subs.chosen == t,
+                )
+            }
+        }
+        when {
+            subs.searching -> item(key = "cc-wait") { PanelNote("Looking for subtitles…") }
+            addonTitle && !vm.addons.hasSubtitleAddons ->
+                item(key = "cc-hint") { PanelNote("Add a subtitle add-on (like OpenSubtitles) in Settings › Add-ons for subtitles in more languages.") }
+            text.isEmpty() && subs.tracks.isEmpty() -> item(key = "cc-none") { PanelNote("No subtitles for this video.") }
+        }
+        if (subs.chosen != null) {
+            item(key = "cc-delay") {
+                val d = subs.delayMs
+                StepperRow(
+                    "Timing", if (d == 0L) "0 s" else "%+.2f s".format(d / 1000.0),
+                    onMinus = { subs.delayMs -= 250 }, onPlus = { subs.delayMs += 250 },
+                    subtitle = "+ shows them later, − earlier",
+                )
+            }
+        }
+        item(key = "cc-style") { SettingRow("Subtitle style", onStyle, subtitle = "Size, color, background, position, language", chevron = true) }
         val heights = video.flatMap { g -> (0 until g.length).map { g.getTrackFormat(it).height } }.filter { it > 0 }.distinct().sortedDescending()
         if (heights.size > 1) {
             item(key = "q-h") { PanelHeader("Quality") }
@@ -699,9 +864,24 @@ private fun SettingsPanel(vm: AppViewModel, stream: StreamController, live: Bool
                 }
             }
         }
-        item(key = "dec") {
-            if (stream.softwareDecoding) Text("Decoding in software (this TV's video decoders are busy).", fontSize = 12.sp, color = AppColors.TextFaint, modifier = Modifier.padding(12.dp))
-        }
+    }
+}
+
+@Composable
+private fun PanelNote(text: String) {
+    Text(text, fontSize = 13.sp, color = AppColors.TextDim, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+}
+
+/** Subtitle look, with a live preview; Back returns to the settings panel. */
+@Composable
+private fun SubtitleStylePanel(vm: AppViewModel) {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) { first.requestFocusSafely(150) }
+    Column(Modifier.width(400.dp).fillMaxHeight().background(Color(0xF2181818)).padding(horizontal = 16.dp, vertical = 24.dp)) {
+        Text("Subtitle style", fontSize = 20.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 12.dp, bottom = 10.dp))
+        SubtitlePreview(vm.subtitleStyle)
+        Spacer(Modifier.height(8.dp))
+        LazyColumn(Modifier.focusRequester(first), contentPadding = PaddingValues(bottom = 24.dp)) { subtitleStyleItems(vm, "p") }
     }
 }
 

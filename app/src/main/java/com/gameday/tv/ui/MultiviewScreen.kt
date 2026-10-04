@@ -13,6 +13,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -60,7 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import com.gameday.tv.data.Channel
 import com.gameday.tv.data.GameState
-import com.gameday.tv.data.League
+import com.gameday.tv.data.SportPick
 import com.gameday.tv.data.MultiviewLayout
 import com.gameday.tv.ui.theme.AppColors
 import kotlinx.coroutines.delay
@@ -137,8 +139,14 @@ fun MultiviewScreen(vm: AppViewModel) {
             }
         }
 
-        val maxConnections = vm.accountInfo?.maxConnections?.toIntOrNull()
-        if (maxConnections != null && vm.multiviewCount > maxConnections) {
+        // Warn when more screens come from one provider than its plan allows.
+        val onScreen = (0 until layout.screens).mapNotNull { vm.multiview[it] }
+        val overLimit = onScreen.groupBy { it.providerId }.entries.firstOrNull { (_, list) ->
+            val limit = vm.connectionLimit(list.first())
+            limit != null && list.size > limit
+        }
+        if (overLimit != null) {
+            val maxConnections = vm.connectionLimit(overLimit.value.first()) ?: 0
             Text(
                 "Your IPTV plan allows $maxConnections connection${if (maxConnections == 1) "" else "s"} — some screens may not play.",
                 fontSize = 13.sp,
@@ -342,6 +350,7 @@ private fun MultiviewTile(
         } else {
             ActiveTile(
                 vm = vm,
+                slot = slot,
                 channel = channel,
                 isAudio = isAudio,
                 focused = focused,
@@ -353,9 +362,13 @@ private fun MultiviewTile(
 }
 
 @Composable
-private fun ActiveTile(vm: AppViewModel, channel: Channel, isAudio: Boolean, focused: Boolean, bugSignal: Int, onTop: Boolean) {
+private fun ActiveTile(vm: AppViewModel, slot: Int, channel: Channel, isAudio: Boolean, focused: Boolean, bugSignal: Int, onTop: Boolean) {
     // Tiles don't request audio focus: several players fighting over it would pause each other.
     val stream = rememberStreamController(handleAudioFocus = false)
+    val decoding = vm.decoderMode(DecoderSlot.multiview(slot))
+    // Before load(), so the first start already uses this screen's decoder.
+    LaunchedEffect(stream, decoding) { stream.applyDecoderMode(decoding) }
+    LaunchedEffect(stream.softwareDecoding) { vm.multiviewSoftware[slot] = stream.softwareDecoding }
     val candidates = remember(channel.id, vm.streamFormat) { vm.streamCandidates(channel) }
     val single = vm.multiviewLayout.screens == 1
     LaunchedEffect(stream, single) { if (single) stream.setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE) else stream.setMaxVideoSize(1280, 720) }
@@ -365,8 +378,11 @@ private fun ActiveTile(vm: AppViewModel, channel: Channel, isAudio: Boolean, foc
     }
     LaunchedEffect(isAudio, single) { stream.volume = if (isAudio || single) 1f else 0f }
 
-    val game = remember(channel.id, vm.games) { vm.liveGameFor(channel) }
-    val tournament = remember(channel.id, vm.tournaments) { if (game == null) vm.liveTournamentFor(channel) else null }
+    val liveGame = remember(channel.id, vm.games) { vm.liveGameFor(channel) }
+    val liveTournament = remember(channel.id, vm.tournaments) { if (liveGame == null) vm.liveTournamentFor(channel) else null }
+    // The stream runs behind the scoreboard: show the score from that long ago.
+    val game = vm.delayedGame(liveGame)
+    val tournament = vm.delayedTournament(liveTournament)
     val bug = rememberBugState(channel.id, scoreKeyOf(game, tournament), vm.scoreBugMode, vm.scoreAlerts, showMillis = 6_000)
     LaunchedEffect(bugSignal) { if (bugSignal > 0) bug.show() }
 
@@ -457,7 +473,8 @@ private fun ScreenMenu(
             .width(400.dp)
             .fillMaxHeight()
             .background(SidebarBackground)
-            .padding(start = 22.dp, end = 22.dp, top = 20.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(start = 22.dp, end = 22.dp, top = 20.dp, bottom = 12.dp),
     ) {
         Text("Screen ${slot + 1}", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Text(channel?.name ?: "Empty", fontSize = 13.sp, color = AppColors.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -468,6 +485,13 @@ private fun ScreenMenu(
                 OptionRow("Watch full screen", onFullscreen)
                 OptionRow("Remove this screen's channel", onRemove)
             }
+            val decSlot = DecoderSlot.multiview(slot)
+            val mode = vm.decoderMode(decSlot)
+            OptionRow(
+                "Video decoding: ${mode.label}",
+                { vm.setDecoderMode(decSlot, mode.next()) },
+                subtitle = if (channel != null) decodingStatus(mode, vm.multiviewSoftware[slot] == true) else null,
+            )
             if (vm.multiviewLayout.screens < 4) OptionRow("＋ Add a screen", onAddScreen)
         }
         Spacer(Modifier.height(16.dp))
@@ -482,9 +506,12 @@ private fun ScreenMenu(
 }
 
 @Composable
-private fun OptionRow(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun OptionRow(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, subtitle: String? = null) {
     FocusSurface(onClick = onClick, modifier = modifier.fillMaxWidth(), focusedScale = 1.02f, shape = RoundedCornerShape(10.dp)) {
-        Text(text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp))
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 11.dp)) {
+            Text(text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            if (subtitle != null) Text(subtitle, fontSize = 11.sp, color = AppColors.TextDim)
+        }
     }
 }
 
@@ -515,7 +542,7 @@ private sealed interface PickerPage {
     data object Menu : PickerPage { override val title = "Choose a channel" }
     data object LiveNow : PickerPage { override val title = "Live now" }
     data object MyTeams : PickerPage { override val title = "Your teams" }
-    data class Sport(val league: League) : PickerPage { override val title = league.label }
+    data class Sport(val league: SportPick) : PickerPage { override val title = league.label }
     data object Recent : PickerPage { override val title = "Recent channels" }
     data object Categories : PickerPage { override val title = "Categories" }
     data class Category(val name: String) : PickerPage { override val title = name }
@@ -619,17 +646,18 @@ private fun PickerMenu(vm: AppViewModel, onScreens: Set<String>, firstFocus: Foc
             }
         }
         item(key = "sports-h") { PickerHeader("Sports") }
-        items(vm.followedLeagues + vm.followedTours, key = { "l:" + it.key }) { league ->
-            val summary = if (league.sport == "golf") {
-                val t = vm.tournaments.filter { it.tour.key == league.key && it.state != GameState.FINAL }
+        items(vm.followedPicks, key = { "l:" + it.key }) { pick ->
+            val keys = pick.leagueKeys
+            val summary = if (pick.sport == "golf") {
+                val t = vm.tournaments.filter { it.tour.key in keys && it.state != GameState.FINAL }
                 t.firstOrNull()?.let { "${it.name} · ${it.detail}" } ?: "No tournament this week"
             } else {
-                val lg = vm.games.filter { it.league.key == league.key }
+                val lg = vm.games.filter { it.league.key in keys }
                 eventsSummary(lg.count { it.state == GameState.LIVE }, lg.count { it.state == GameState.PRE && it.startMillis < soon })
             }
-            val live = if (league.sport == "golf") vm.tournaments.any { it.tour.key == league.key && it.roundInProgress }
-            else vm.games.any { it.league.key == league.key && it.state == GameState.LIVE }
-            MenuRow(league.label, summary, live = live) { go(PickerPage.Sport(league)) }
+            val live = if (pick.sport == "golf") vm.tournaments.any { it.tour.key in keys && it.roundInProgress }
+            else vm.games.any { it.league.key in keys && it.state == GameState.LIVE }
+            MenuRow(pick.label, summary, live = live) { go(PickerPage.Sport(pick)) }
         }
         item(key = "more-h") { PickerHeader("More") }
         if (vm.recentChannels.any { it.id !in onScreens }) {
@@ -683,12 +711,12 @@ private fun LiveNowPage(vm: AppViewModel, onScreens: Set<String>, onPick: (Chann
 
 /** A sport (or My Teams when [league] is null): each live/upcoming event with its best streams, then the sport's channels. */
 @Composable
-private fun EventsPage(vm: AppViewModel, league: League?, onScreens: Set<String>, onPick: (Channel) -> Unit, firstFocus: FocusRequester) {
+private fun EventsPage(vm: AppViewModel, league: SportPick?, onScreens: Set<String>, onPick: (Channel) -> Unit, firstFocus: FocusRequester) {
     var events by remember(league) { mutableStateOf<List<EventStreams>?>(null) }
     var channels by remember(league) { mutableStateOf<List<Channel>>(emptyList()) }
     LaunchedEffect(league) {
         events = vm.eventStreams(league?.key)
-        channels = if (league != null) vm.leagueChannels(league) else emptyList()
+        channels = league?.leagues?.flatMap { vm.leagueChannels(it) }?.distinctBy { it.id }.orEmpty()
     }
     val evs = events
     val firstChannel = evs?.flatMap { e -> e.matches.map { it.channel } }?.firstOrNull { it.id !in onScreens }

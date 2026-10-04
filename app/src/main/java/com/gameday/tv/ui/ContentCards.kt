@@ -119,11 +119,18 @@ fun SeriesCard(vm: AppViewModel, s: Series, screenKey: String, onHero: (HeroInfo
 fun SavedCard(vm: AppViewModel, item: SavedItem, screenKey: String) {
     MediaCard(
         title = item.title,
-        subtitle = if (item.kind == SavedKind.MOVIE) "Movie" else "Show",
+        subtitle = when (item.kind) {
+            SavedKind.MOVIE -> "Movie"
+            SavedKind.SERIES -> "Show"
+            SavedKind.ADDON_MOVIE -> "Movie · On Demand"
+            SavedKind.ADDON_SERIES -> "Show · On Demand"
+        },
         onClick = {
             when (item.kind) {
                 SavedKind.MOVIE -> vm.navigate(Screen.MovieDetail(item.id))
                 SavedKind.SERIES -> vm.navigate(Screen.SeriesDetail(item.id))
+                SavedKind.ADDON_MOVIE -> vm.navigate(Screen.AddonDetail("movie", item.id))
+                SavedKind.ADDON_SERIES -> vm.navigate(Screen.AddonDetail("series", item.id))
             }
         },
         onLongClick = {
@@ -210,17 +217,29 @@ fun TeamCard(vm: AppViewModel, team: FavoriteTeam, screenKey: String) {
 
 @Composable
 fun PresetCard(vm: AppViewModel, preset: MultiviewPreset, screenKey: String, onHero: (HeroInfo) -> Unit = {}) {
+    val lines = if (preset.games.isNotEmpty()) preset.games.map { it.title } else preset.channels.map { cleanChannelName(it.name) }
     MediaCard(
         title = preset.title,
         subtitle = preset.subtitle,
         onClick = { vm.startMultiview(preset.channels) },
-        onFocus = { onHero(HeroInfo(preset.title, listOf("Multiview", preset.subtitle), preset.games.joinToString("\n") { it.title }, live = true)) },
-        modifier = Modifier.rememberFocus(vm, screenKey, "mv:" + preset.title),
+        onFocus = { onHero(HeroInfo(preset.title, listOf("Multiview", preset.subtitle), lines.joinToString("\n"), live = true)) },
+        modifier = Modifier.rememberFocus(vm, screenKey, "mv:" + preset.key),
     ) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            preset.games.take(4).chunked(2).forEach { row ->
+            val tiles: List<@Composable () -> Unit> = if (preset.games.isNotEmpty()) {
+                preset.games.take(4).map { g -> @Composable { GameArt(g, logoFraction = 0.55f, showScore = false) } }
+            } else {
+                preset.channels.take(4).map { c ->
+                    @Composable {
+                        Box(Modifier.fillMaxSize().background(Color(0xFF2A2A2A)), contentAlignment = Alignment.Center) {
+                            ChannelLogo(c, 34.dp, background = Color.Transparent)
+                        }
+                    }
+                }
+            }
+            tiles.chunked(2).forEach { row ->
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    row.forEach { g -> Box(Modifier.weight(1f).fillMaxSize()) { GameArt(g, logoFraction = 0.55f, showScore = false) } }
+                    row.forEach { tile -> Box(Modifier.weight(1f).fillMaxSize()) { tile() } }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
@@ -232,6 +251,24 @@ fun PresetCard(vm: AppViewModel, preset: MultiviewPreset, screenKey: String, onH
         }
         Box(Modifier.fillMaxSize().padding(6.dp)) { LiveBadge(Modifier.align(Alignment.BottomStart), small = true) }
     }
+}
+
+/** A movie or show from a streaming add-on. */
+@Composable
+fun AddonCard(vm: AppViewModel, meta: com.gameday.tv.data.MetaPreview, screenKey: String, onHero: (HeroInfo) -> Unit = {}, keyPrefix: String = "") {
+    val kind = if (meta.type == "series") "Show" else if (meta.type == "movie") "Movie" else meta.type.replaceFirstChar { it.uppercase() }
+    MediaCard(
+        title = meta.name,
+        subtitle = listOfNotNull(meta.releaseInfo, meta.imdbRating?.let { "★ $it" }).joinToString(" · ").ifBlank { kind },
+        onClick = { vm.navigate(Screen.AddonDetail(meta.type, meta.id)) },
+        onFocus = {
+            onHero(HeroInfo(meta.name, listOfNotNull(kind, meta.releaseInfo, meta.genres.take(2).joinToString(", ").ifBlank { null }, meta.imdbRating?.let { "★ $it" }),
+                meta.description, image = meta.background ?: meta.poster))
+        },
+        modifier = Modifier.rememberFocus(vm, screenKey, keyPrefix + meta.type + ":" + meta.id),
+        width = POSTER_WIDTH.dp,
+        aspect = 2f / 3f,
+    ) { PosterThumb(meta.poster, meta.name) }
 }
 
 /** "See all" tile at the end of a row. */
