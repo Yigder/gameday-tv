@@ -70,66 +70,6 @@ data class Program(
         if (endMillis <= startMillis) 0f else ((now - startMillis).toFloat() / (endMillis - startMillis)).coerceIn(0f, 1f)
 }
 
-// ---------- Movies & shows ----------
-
-data class VodCategory(val id: String, val name: String)
-
-data class Movie(
-    val id: String,
-    val name: String,
-    val poster: String?,
-    val categoryId: String?,
-    val rating: Double?,
-    /** When the provider added it (epoch seconds), for "Recently added". */
-    val added: Long,
-    val ext: String,
-    /** Direct URL (M3U playlists). */
-    val url: String? = null,
-)
-
-data class MovieInfo(
-    val plot: String?,
-    val cast: String?,
-    val director: String?,
-    val genre: String?,
-    val releaseDate: String?,
-    val durationSecs: Int?,
-    val backdrop: String?,
-    val rating: String?,
-    val ext: String?,
-)
-
-data class Series(
-    val id: String,
-    val name: String,
-    val poster: String?,
-    val categoryId: String?,
-    val plot: String?,
-    val genre: String?,
-    val rating: Double?,
-    val releaseDate: String?,
-    val backdrop: String?,
-    val lastModified: Long,
-)
-
-data class Episode(
-    val id: String,
-    val seriesId: String,
-    val season: Int,
-    val number: Int,
-    val title: String,
-    val plot: String?,
-    val image: String?,
-    val durationSecs: Int?,
-    val ext: String,
-)
-
-data class SeriesInfo(val series: Series, val seasons: List<Int>, val episodes: Map<Int, List<Episode>>) {
-    val allEpisodes: List<Episode> get() = seasons.flatMap { episodes[it].orEmpty() }
-}
-
-class VodLibrary<T>(val categories: List<VodCategory>, val items: List<T>)
-
 // ---------- Scores ----------
 
 enum class GameState { PRE, LIVE, FINAL }
@@ -301,15 +241,7 @@ data class Profile(val id: String, val name: String, val color: Int) {
 
 // ---------- Library ----------
 
-/** MOVIE / SERIES are from the IPTV provider; ADDON_* are from streaming add-ons (id = meta id). */
-enum class SavedKind { MOVIE, SERIES, ADDON_MOVIE, ADDON_SERIES }
-
-data class SavedItem(val kind: SavedKind, val id: String, val title: String, val image: String?, val addedAt: Long) {
-    val key: String get() = "${kind.name}:$id"
-    val isMovie: Boolean get() = kind == SavedKind.MOVIE || kind == SavedKind.ADDON_MOVIE
-}
-
-/** Where the viewer stopped in something they can resume (movie, episode, recording). */
+/** Where the viewer stopped in a recording. */
 data class ResumePoint(
     val key: String,
     val title: String,
@@ -320,26 +252,6 @@ data class ResumePoint(
     val updatedAt: Long,
 ) {
     val progress: Float get() = if (durationMs <= 0) 0f else (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
-}
-
-/**
- * "Continue watching" shows one card per show: its most recently watched episode. Every episode
- * keeps its own resume point (for the show's episode list); only the row is combined.
- */
-object ContinueWatching {
-    /**
-     * What a resume key belongs to: an add-on title ("addon:series:tt123|tt123:1:2" → "addon:series:tt123"),
-     * a provider show ("ep:<seriesId>:<episodeId>:<ext>" → "ep:<seriesId>"), or itself (movies, recordings).
-     */
-    fun groupKey(key: String): String = when {
-        key.startsWith("addon:") -> key.substringBefore('|')
-        key.startsWith("ep:") -> "ep:" + key.removePrefix("ep:").substringBefore(':')
-        else -> key
-    }
-
-    /** The latest point of each show (and every movie), most recent first. */
-    fun latestPerShow(points: List<ResumePoint>): List<ResumePoint> =
-        points.sortedByDescending { it.updatedAt }.distinctBy { groupKey(it.key) }
 }
 
 // ---------- Recordings (DVR) ----------

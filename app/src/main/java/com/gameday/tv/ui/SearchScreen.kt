@@ -56,10 +56,6 @@ fun SearchScreen(vm: AppViewModel) {
     val nav = rememberRowNav(listState)
     InitialFocus(vm, screenKey, firstKey)
 
-    LaunchedEffect(Unit) {
-        vm.ensureMovies()
-        vm.ensureSeries()
-    }
     LaunchedEffect(query) {
         if (query.trim().length < 2) {
             results = null
@@ -129,7 +125,7 @@ fun SearchScreen(vm: AppViewModel) {
             when {
                 query.trim().length < 2 -> SearchSuggestions(vm, screenKey) { query = it }
                 r == null || (searching && r.isEmpty) -> LoadingState("Searching…", Modifier.padding(top = 80.dp))
-                r.isEmpty -> EmptyState("No results for \"$query\"", "Try a team, a channel, a league, or a movie or show title.", Modifier.padding(top = 80.dp))
+                r.isEmpty -> EmptyState("No results for \"$query\"", "Try a team, a channel, a league, or a show on TV.", Modifier.padding(top = 80.dp))
                 // New rows for each search, so they start at the first result.
                 else -> key(r) { PivotScroll(offset = ROW_TITLE) {
                     LazyColumn(Modifier.focusRequester(resultsFocus), state = listState, contentPadding = PaddingValues(bottom = 200.dp)) {
@@ -164,20 +160,6 @@ fun SearchScreen(vm: AppViewModel) {
                                     }
                                 }
                             }
-                        }
-                        if (r.movies.isNotEmpty()) {
-                            cardRow("movies", "Movies", nav) { items(r.movies, key = { it.id }) { MovieCard(vm, it, screenKey) } }
-                        }
-                        if (r.series.isNotEmpty()) {
-                            cardRow("series", "Shows", nav) { items(r.series, key = { it.id }) { SeriesCard(vm, it, screenKey) } }
-                        }
-                        val odMovies = r.onDemand.filter { it.type == "movie" }
-                        val odShows = r.onDemand.filter { it.type != "movie" }
-                        if (odMovies.isNotEmpty()) {
-                            cardRow("od-movies", "On Demand movies", nav) { items(odMovies, key = { "od:" + it.id }) { AddonCard(vm, it, screenKey) } }
-                        }
-                        if (odShows.isNotEmpty()) {
-                            cardRow("od-shows", "On Demand shows", nav) { items(odShows, key = { "od:" + it.type + it.id }) { AddonCard(vm, it, screenKey) } }
                         }
                     }
                 } }

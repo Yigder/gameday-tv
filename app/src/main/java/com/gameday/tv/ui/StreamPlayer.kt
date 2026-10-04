@@ -86,7 +86,6 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
 
     private var key: String? = null
     private var candidates: List<String> = emptyList()
-    private var headers: Map<String, String> = emptyMap()
 
     /** What's loaded (a channel id, a resume key…), or null when stopped. */
     val currentKey: String? get() = key
@@ -173,12 +172,11 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
      * Starts [urls] unless this exact stream is already playing (so moving between the menus and the
      * full-screen player doesn't interrupt it). [startPositionMs] resumes seekable video.
      */
-    fun load(key: String, urls: List<String>, startPositionMs: Long = 0, headers: Map<String, String> = emptyMap()) {
+    fun load(key: String, urls: List<String>, startPositionMs: Long = 0) {
         val running = player.playbackState != Player.STATE_IDLE && !ended && error == null
         if (key == this.key && urls == candidates && running) return
         this.key = key
         candidates = urls
-        this.headers = headers
         startAt = startPositionMs.coerceAtLeast(0)
         ended = false
         attempt = 0
@@ -217,7 +215,7 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         if (player.isPlaying) {
             player.pause()
         } else {
-            // Live streams resume at the live edge; movies and recordings where they paused.
+            // Live streams resume at the live edge; recordings where they paused.
             if (player.isCurrentMediaItemLive || !player.isCurrentMediaItemSeekable) player.seekToDefaultPosition()
             player.play()
         }
@@ -229,7 +227,7 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
     val liveSeekable: Boolean
         get() = player.isCurrentMediaItemLive && player.isCurrentMediaItemSeekable && player.duration != C.TIME_UNSET && player.duration > 30_000
 
-    /** Back / forward work: movies, recordings, catch-up, and live streams with a rewind window. */
+    /** Back / forward work: recordings, catch-up, and live streams with a rewind window. */
     val canSeek: Boolean get() = seekable || liveSeekable
 
     /**
@@ -256,7 +254,7 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         player.seekTo((player.currentPosition + deltaMs).coerceIn(0, player.duration))
     }
 
-    /** Playback speed (movies and shows): 1 = normal. */
+    /** Playback speed (recordings): 1 = normal. */
     var speed: Float
         get() = player.playbackParameters.speed
         set(v) {
@@ -339,7 +337,6 @@ class StreamController(context: Context, handleAudioFocus: Boolean) {
         buffering = true
         cues = emptyList()
         loadToken++
-        dataSource.setDefaultRequestProperties(headers)
         player.stop() // codecs are chosen at prepare time, so start clean
         if (startAt > 0) player.setMediaItem(mediaItemFor(url), startAt) else player.setMediaItem(mediaItemFor(url))
         player.prepare()

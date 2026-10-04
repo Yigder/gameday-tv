@@ -111,19 +111,10 @@ class AccountPrefs(context: Context, val accountId: String) {
             prefs.edit().putString(K_PROVIDERS, Vault.seal(Providers.encode(v))).remove(K_IPTV).apply()
         }
 
-    /** Streaming add-ons (manifest URLs can hold debrid keys, so they're encrypted). Null until first set up. */
-    var addons: List<InstalledAddon>?
-        get() = Vault.open(prefs.getString(K_ADDONS, null))?.let { Addons.decodeInstalled(it) }
-        set(v) {
-            prefs.edit().apply { if (v == null) remove(K_ADDONS) else putString(K_ADDONS, Vault.seal(Addons.encodeInstalled(v))) }.apply()
-        }
-
-    /** TorBox API key, encrypted. */
-    var torboxKey: String?
-        get() = Vault.open(prefs.getString(K_TORBOX, null))?.takeIf { it.isNotBlank() }
-        set(v) {
-            prefs.edit().apply { if (v.isNullOrBlank()) remove(K_TORBOX) else putString(K_TORBOX, Vault.seal(v.trim())) }.apply()
-        }
+    /** Drops what On Demand saved (add-on links and the TorBox key) before it was removed. */
+    fun forgetOnDemand() {
+        if (prefs.contains(K_ADDONS) || prefs.contains(K_TORBOX)) prefs.edit().remove(K_ADDONS).remove(K_TORBOX).apply()
+    }
 
     /** The user chose to watch scores without an IPTV provider for now. */
     var providerSkipped: Boolean by prefs.boolean(K_SKIPPED, false)
@@ -249,19 +240,12 @@ class ProfilePrefs(context: Context, accountId: String, profileId: String) {
         get() = readStrings(K_RECENT_SEARCHES)
         set(v) = writeStrings(K_RECENT_SEARCHES, v.take(8))
 
-    var saved: List<SavedItem>
-        get() = readList(K_SAVED) { o ->
-            SavedItem(SavedKind.valueOf(o.getString("kind")), o.getString("id"), o.optString("title"), o.optString("image").ifBlank { null }, o.optLong("added"))
-        }
-        set(v) = writeList(K_SAVED, v) { s ->
-            JSONObject().put("kind", s.kind.name).put("id", s.id).put("title", s.title).put("image", s.image.orEmpty()).put("added", s.addedAt)
-        }
-
+    /** Where recordings were left ("rec:<id>"; movie and episode points from before 2.4 are skipped). */
     var resume: List<ResumePoint>
         get() = readList(K_RESUME) { o ->
             ResumePoint(o.getString("key"), o.optString("title"), o.optString("subtitle"), o.optString("image").ifBlank { null },
                 o.optLong("pos"), o.optLong("dur"), o.optLong("at"))
-        }
+        }.filter { it.key.startsWith("rec:") }
         set(v) = writeList(K_RESUME, v.sortedByDescending { it.updatedAt }.take(40)) { r ->
             JSONObject().put("key", r.key).put("title", r.title).put("subtitle", r.subtitle).put("image", r.image.orEmpty())
                 .put("pos", r.positionMs).put("dur", r.durationMs).put("at", r.updatedAt)
@@ -276,7 +260,6 @@ class ProfilePrefs(context: Context, accountId: String, profileId: String) {
 
     var scoreAlerts: Boolean by prefs.boolean(K_ALERTS, true)
     var captions: Boolean by prefs.boolean(K_CAPTIONS, false)
-    var autoplayNext: Boolean by prefs.boolean(K_AUTOPLAY, true)
 
     /**
      * Seconds the score bug and score alerts lag behind live scores. IPTV streams run behind the
@@ -289,9 +272,6 @@ class ProfilePrefs(context: Context, accountId: String, profileId: String) {
     /** Live video behind the menus, like YouTube TV: "sound", "muted" or "off". */
     var backgroundVideo: String by prefs.string(K_BG_VIDEO, "sound")
 
-    /** On Demand trailers on the focused card (like Nuvio): "muted", "sound" or "off". */
-    var trailerPreviews: String by prefs.string(K_TRAILERS, "muted")
-
     /** Live guide filter: "all", "sports", "favorites", "recent" or "group:<name>". */
     var guideFilter: String by prefs.string(K_GUIDE_FILTER, "sports")
 
@@ -300,7 +280,7 @@ class ProfilePrefs(context: Context, accountId: String, profileId: String) {
         get() = SubtitleStyle.decode(prefs.getString(K_SUB_STYLE, null))
         set(v) = prefs.edit().putString(K_SUB_STYLE, v.encode()).apply()
 
-    /** Subtitle language picked automatically (ISO 639-1); the TV's language until changed. */
+    /** Caption language picked automatically (ISO 639-1); the TV's language until changed. */
     var subtitleLanguage: String
         get() = prefs.getString(K_SUB_LANG, null) ?: java.util.Locale.getDefault().language.ifBlank { "en" }
         set(v) = prefs.edit().putString(K_SUB_LANG, v).apply()
@@ -308,9 +288,11 @@ class ProfilePrefs(context: Context, accountId: String, profileId: String) {
     /** Size of the player's round buttons: "small", "medium" or "large". */
     var playerButtons: String by prefs.string(K_PLAYER_BUTTONS, "medium")
 
-    var recentOnDemandSearches: List<String>
-        get() = readStrings(K_RECENT_OD_SEARCHES)
-        set(v) = writeStrings(K_RECENT_OD_SEARCHES, v.take(8))
+    /** Drops what On Demand saved (saved titles, its searches and settings) before it was removed. */
+    fun forgetOnDemand() {
+        val old = listOf(K_SAVED, K_AUTOPLAY, K_TRAILERS, K_RECENT_OD_SEARCHES).filter { prefs.contains(it) }
+        if (old.isNotEmpty()) prefs.edit().apply { old.forEach { remove(it) } }.apply()
+    }
 
     private fun readStrings(key: String): List<String> = runCatching {
         val arr = JSONArray(prefs.getString(key, "[]"))

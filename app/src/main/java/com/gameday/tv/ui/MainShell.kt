@@ -60,11 +60,11 @@ private fun videoFrameFor(tab: Tab): VideoFrame? = when (tab) {
     // Down to where the first row (or the filter chips) begins.
     Tab.SPORTS -> VideoFrame(0.6f, 250.dp)
     Tab.LIVE -> VideoFrame(0.42f, 214.dp)
-    // On Demand shows each title's art, and the library has no header.
-    Tab.ON_DEMAND, Tab.LIBRARY -> null
+    // The library has no header.
+    Tab.LIBRARY -> null
 }
 
-/** Sports / Live / On Demand / Library with the YouTube TV-style top bar. */
+/** Sports / Live / Library with the YouTube TV-style top bar. */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
@@ -101,7 +101,6 @@ fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
             when (tab) {
                 Tab.SPORTS -> SportsTab(vm)
                 Tab.LIVE -> LiveTab(vm)
-                Tab.ON_DEMAND -> OnDemandTab(vm)
                 Tab.LIBRARY -> LibraryTab(vm)
             }
         }
@@ -132,7 +131,7 @@ fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
                 }
             }
             Spacer(Modifier.weight(1f))
-            TopIconButton(Icons.Search, "Search") { vm.navigate(if (vm.tab == Tab.ON_DEMAND) Screen.OnDemandSearch else Screen.Search) }
+            TopIconButton(Icons.Search, "Search") { vm.navigate(Screen.Search) }
             Spacer(Modifier.width(10.dp))
             TopIconButton(Icons.Settings, "Settings") { vm.openSettings() }
             Spacer(Modifier.width(10.dp))

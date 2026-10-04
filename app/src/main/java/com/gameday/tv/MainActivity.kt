@@ -27,23 +27,17 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.tv.material3.Text
 import androidx.compose.runtime.LaunchedEffect
-import com.gameday.tv.ui.AddonBrowseScreen
-import com.gameday.tv.ui.AddonDetailScreen
-import com.gameday.tv.ui.AddonInstallScreen
 import com.gameday.tv.ui.AppViewModel
 import com.gameday.tv.ui.BackHold
 import com.gameday.tv.ui.DisplayModes
 import com.gameday.tv.ui.FollowAppLifecycle
 import com.gameday.tv.ui.KeyActivity
-import com.gameday.tv.ui.TorBoxSetupScreen
 import com.gameday.tv.ui.WatchStalls
-import com.gameday.tv.ui.BrowseScreen
 import com.gameday.tv.ui.ChannelScreen
 import com.gameday.tv.ui.CreateAccountScreen
 import com.gameday.tv.ui.DialogHost
 import com.gameday.tv.ui.GameScreen
 import com.gameday.tv.ui.MainShell
-import com.gameday.tv.ui.MovieScreen
 import com.gameday.tv.ui.MultiviewBuilderScreen
 import com.gameday.tv.ui.MultiviewScreen
 import com.gameday.tv.ui.OkKeyGate
@@ -54,8 +48,6 @@ import com.gameday.tv.ui.ProfilesScreen
 import com.gameday.tv.ui.ProviderScreen
 import com.gameday.tv.ui.Screen
 import com.gameday.tv.ui.SearchScreen
-import com.gameday.tv.ui.OnDemandSearchScreen
-import com.gameday.tv.ui.SeriesScreen
 import com.gameday.tv.ui.SettingsScreen
 import com.gameday.tv.ui.SignInScreen
 import com.gameday.tv.ui.TeamScreen
@@ -122,24 +114,16 @@ private fun GameDayApp(vm: AppViewModel = viewModel()) {
                 Screen.CreateAccount -> CreateAccountScreen(vm)
                 is Screen.Onboarding -> OnboardingScreen(vm, screen.step)
                 is Screen.Provider -> ProviderScreen(vm, onboarding = false, editId = screen.editId)
-                Screen.AddonInstall -> AddonInstallScreen(vm)
-                Screen.TorBoxSetup -> TorBoxSetupScreen(vm)
-                is Screen.AddonDetail -> AddonDetailScreen(vm, screen.type, screen.id)
-                is Screen.AddonBrowse -> AddonBrowseScreen(vm, screen.rowKey)
                 Screen.TeamsPicker -> TeamsPickerScreen(vm)
                 is Screen.Profiles -> ProfilesScreen(vm, screen.manage)
                 is Screen.ProfileEdit -> ProfileEditScreen(vm, screen.profileId)
                 Screen.Main -> MainShell(vm, stateHolder)
                 Screen.Search -> SearchScreen(vm)
-                Screen.OnDemandSearch -> OnDemandSearchScreen(vm)
                 is Screen.Settings -> SettingsScreen(vm)
                 is Screen.GameDetail -> GameScreen(vm, screen.gameId)
                 is Screen.TournamentDetail -> TournamentScreen(vm, screen.tournamentId)
                 is Screen.Team -> TeamScreen(vm, screen.leagueKey, screen.teamId)
                 is Screen.ChannelDetail -> ChannelScreen(vm, screen.channelId)
-                is Screen.MovieDetail -> MovieScreen(vm, screen.movieId)
-                is Screen.SeriesDetail -> SeriesScreen(vm, screen.seriesId)
-                is Screen.Browse -> BrowseScreen(vm, screen.kind, screen.categoryId)
                 Screen.Player -> PlayerScreen(vm)
                 Screen.Multiview -> MultiviewScreen(vm)
                 Screen.MultiviewBuilder -> MultiviewBuilderScreen(vm)

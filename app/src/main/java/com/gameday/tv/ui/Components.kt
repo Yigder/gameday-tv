@@ -868,7 +868,7 @@ fun InitialFocus(vm: AppViewModel, screenKey: String, default: FocusRequester, k
 }
 
 /**
- * Back on a long list (Sports, Live, On Demand): first it glides back to the top and puts focus on
+ * Back on a long list (Sports, Live): first it glides back to the top and puts focus on
  * [top]; once there, Back does what it normally does (another tab, exit).
  */
 @Composable

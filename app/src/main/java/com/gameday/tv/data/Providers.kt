@@ -4,8 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * One IPTV login or playlist on an account. An account can have several; their channels, guides,
- * movies and shows are combined.
+ * One IPTV login or playlist on an account. An account can have several; their channels and
+ * guides are combined.
  *
  * Ids from a provider are made unique by [prefix] ("p3k9~x1234"). The first provider keeps an empty
  * prefix so favorites, history and recordings saved before multiple providers still match.
@@ -85,7 +85,6 @@ object Providers {
 class ScopedSource(val entry: ProviderEntry, private val inner: IptvSource) {
     val prefix: String get() = entry.prefix
     private fun scope(raw: String) = Providers.scoped(prefix, raw)
-    private fun unscope(id: String) = if (prefix.isEmpty()) id else Providers.unscoped(id)
 
     var info: AccountInfo? = null
         private set
@@ -104,35 +103,4 @@ class ScopedSource(val entry: ProviderEntry, private val inner: IptvSource) {
     val xmltvUrl: String? get() = inner.xmltvUrl
 
     fun catchupUrl(channel: Channel, program: Program): String? = inner.catchupUrl(channel, program)
-
-    val hasVod: Boolean get() = inner.hasVod
-    val hasSeries: Boolean get() = inner is XtreamSource
-
-    suspend fun loadMovies(): VodLibrary<Movie> {
-        val lib = inner.loadMovies()
-        return VodLibrary(
-            lib.categories.map { it.copy(id = scope(it.id)) },
-            lib.items.map { it.copy(id = scope(it.id), categoryId = it.categoryId?.let(::scope)) },
-        )
-    }
-
-    suspend fun loadSeries(): VodLibrary<Series> {
-        val lib = inner.loadSeries()
-        return VodLibrary(
-            lib.categories.map { it.copy(id = scope(it.id)) },
-            lib.items.map { it.copy(id = scope(it.id), categoryId = it.categoryId?.let(::scope)) },
-        )
-    }
-
-    suspend fun movieInfo(movie: Movie): MovieInfo? = inner.movieInfo(movie.copy(id = unscope(movie.id)))
-
-    suspend fun seriesInfo(series: Series): SeriesInfo {
-        val info = inner.seriesInfo(series.copy(id = unscope(series.id)))
-        val episodes = info.episodes.mapValues { (_, list) -> list.map { it.copy(id = scope(it.id), seriesId = series.id) } }
-        return SeriesInfo(info.series.copy(id = series.id, categoryId = series.categoryId), info.seasons, episodes)
-    }
-
-    fun movieUrl(movie: Movie): String? = inner.movieUrl(movie.copy(id = unscope(movie.id)))
-
-    fun episodeUrl(episode: Episode): String? = inner.episodeUrl(episode.copy(id = unscope(episode.id), seriesId = unscope(episode.seriesId)))
 }

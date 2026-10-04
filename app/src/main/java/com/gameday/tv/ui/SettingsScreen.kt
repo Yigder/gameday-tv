@@ -40,7 +40,6 @@ import com.gameday.tv.data.Http
 import com.gameday.tv.data.IptvAccount
 import com.gameday.tv.data.Leagues
 import com.gameday.tv.data.ScoreBugMode
-import com.gameday.tv.data.Subtitles
 import com.gameday.tv.data.XtreamSource
 import com.gameday.tv.ui.theme.AppColors
 import kotlinx.coroutines.launch
@@ -79,7 +78,6 @@ fun SettingsScreen(vm: AppViewModel) {
                     SettingsSection.ACCOUNT -> accountSection(vm)
                     SettingsSection.PROFILES -> profilesSection(vm)
                     SettingsSection.PROVIDER -> providerSection(vm)
-                    SettingsSection.ADDONS -> addonsSection(vm)
                     SettingsSection.SPORTS -> sportsSection(vm)
                     SettingsSection.GUIDE -> guideSection(vm)
                     SettingsSection.PLAYBACK -> playbackSection(vm)
@@ -95,7 +93,6 @@ private fun sectionIcon(s: SettingsSection) = when (s) {
     SettingsSection.ACCOUNT -> Icons.Person
     SettingsSection.PROFILES -> Icons.Edit
     SettingsSection.PROVIDER -> Icons.Tv
-    SettingsSection.ADDONS -> Icons.Movie
     SettingsSection.SPORTS -> Icons.Trophy
     SettingsSection.GUIDE -> Icons.Guide
     SettingsSection.PLAYBACK -> Icons.Play
@@ -219,7 +216,7 @@ private fun LazyListScope.profilesSection(vm: AppViewModel) {
 // ---------------------------------------------------------------------------------------------
 
 private fun LazyListScope.providerSection(vm: AppViewModel) {
-    header("TV providers", "Add more than one login or playlist: their channels, guides, movies and shows are combined.")
+    header("TV providers", "Add more than one login or playlist: their channels and guides are combined.")
     if (vm.providers.isEmpty()) {
         item(key = "none") {
             Text("No provider connected. GameDay TV shows live scores, but you'll need a provider to watch.", fontSize = 14.sp,
@@ -256,7 +253,7 @@ private fun LazyListScope.providerSection(vm: AppViewModel) {
     header("Manage")
     item(key = "add") { SettingRow(if (vm.hasProvider) "Add another provider" else "Connect a provider", { vm.navigate(Screen.Provider()) }, icon = Icons.Add, chevron = true) }
     if (vm.hasProvider) {
-        item(key = "reload") { SettingRow("Reload channels", { vm.reloadChannels() }, subtitle = "Get the latest lineups, guides, movies and shows", icon = Icons.Refresh) }
+        item(key = "reload") { SettingRow("Reload channels", { vm.reloadChannels() }, subtitle = "Get the latest lineups and guides", icon = Icons.Refresh) }
     }
 }
 
@@ -275,59 +272,6 @@ private fun providerMenu(vm: AppViewModel, p: com.gameday.tv.data.ProviderEntry)
                     vm.dismissDialog()
                     vm.confirm("Remove ${p.name}?", "Its channels leave the guide. Recordings stay in your library.", "Remove") { vm.removeProvider(p.id) }
                 },
-            ),
-        ),
-    )
-}
-
-// ---------------------------------------------------------------------------------------------
-
-private fun LazyListScope.addonsSection(vm: AppViewModel) {
-    val addons = vm.addons
-    header("Add-ons", "Stremio-compatible add-ons for On Demand: catalogs (like Cinemeta), sources (like Comet) and subtitles (like OpenSubtitles).")
-    items(addons.installed.toList(), key = { "ad:" + it.url }) { a ->
-        val m = a.manifest
-        val what = listOfNotNull(
-            if (a.hasCatalogs) "${m.catalogs.size} catalog${if (m.catalogs.size == 1) "" else "s"}" else null,
-            if (a.hasStreams) "Sources" else null,
-            if (a.hasSubtitles) "Subtitles" else null,
-            if (!a.enabled) "Turned off" else null,
-        ).joinToString(" · ")
-        SettingRow(m.name, { addonMenu(vm, a) }, subtitle = listOfNotNull(what.ifBlank { null }, m.version.ifBlank { null }?.let { "v$it" }).joinToString(" · "),
-            icon = Icons.Movie, chevron = true)
-    }
-    item(key = "add") { SettingRow("Add an add-on", { vm.navigate(Screen.AddonInstall) }, subtitle = "Paste its link, or send it from your phone", icon = Icons.Add, chevron = true) }
-    if (!addons.hasSubtitleAddons) {
-        item(key = "add-subs") {
-            SettingRow("Add OpenSubtitles", { addons.installInBackground(Subtitles.OPENSUBTITLES) },
-                subtitle = "Subtitles in many languages for On Demand movies and shows", icon = Icons.Captions)
-        }
-    }
-    header("TorBox", "Plays torrent sources from TorBox's servers. ⚡ marks sources TorBox already has.")
-    if (addons.torboxConnected) {
-        item(key = "tb") { SettingRow("TorBox", { vm.navigate(Screen.TorBoxSetup) }, subtitle = addons.torboxStatus ?: "Connected", value = "Change key", icon = Icons.Check) }
-        item(key = "tb-remove") { SettingRow("Remove TorBox", { vm.confirm("Remove TorBox?", "Torrent sources won't play until you add a key again.", "Remove") { addons.removeTorBox() } }, icon = Icons.Delete) }
-    } else {
-        item(key = "tb") { SettingRow("Connect TorBox", { vm.navigate(Screen.TorBoxSetup) }, subtitle = "Use your TorBox API key", icon = Icons.Add, chevron = true) }
-    }
-    item(key = "note") {
-        Text(
-            "GameDay TV doesn't host or provide any content. Add-ons are made by others; only stream content you have the rights to watch.",
-            fontSize = 12.sp, color = AppColors.TextFaint, modifier = Modifier.padding(16.dp),
-        )
-    }
-}
-
-private fun addonMenu(vm: AppViewModel, a: com.gameday.tv.data.InstalledAddon) {
-    val addons = vm.addons
-    vm.showDialog(
-        AppDialog(
-            title = a.name,
-            subtitle = a.manifest.description,
-            actions = listOfNotNull(
-                if (addons.installed.indexOfFirst { it.url == a.url } > 0) DialogAction("Move up", Icons.ChevronRight) { vm.dismissDialog(); addons.moveUp(a) } else null,
-                DialogAction(if (a.enabled) "Turn off" else "Turn on", Icons.Movie) { vm.dismissDialog(); addons.setEnabled(a, !a.enabled) },
-                DialogAction("Remove", Icons.Delete) { vm.dismissDialog(); addons.remove(a) },
             ),
         ),
     )
@@ -433,17 +377,6 @@ private fun LazyListScope.playbackSection(vm: AppViewModel) {
                 else -> "Off"
             })
     }
-    item(key = "trailers") {
-        val modes = listOf("muted", "sound", "off")
-        val next = modes[(modes.indexOf(vm.trailerPreviews).coerceAtLeast(0) + 1) % modes.size]
-        SettingRow("Trailer previews", { vm.updateTrailerPreviews(next) },
-            subtitle = "Like Nuvio: resting on a movie or show in On Demand opens it wide and plays its trailer.",
-            value = when (vm.trailerPreviews) {
-                "sound" -> "With sound"
-                "muted" -> "Muted"
-                else -> "Off"
-            })
-    }
     item(key = "smooth") { SmoothMotionRow() }
     header("Remote")
     item(key = "keys") {
@@ -456,11 +389,10 @@ private fun LazyListScope.playbackSection(vm: AppViewModel) {
     item(key = "buttons") {
         val sizes = listOf("small", "medium", "large")
         SettingRow("Player buttons", { vm.updatePlayerButtons(sizes[(sizes.indexOf(vm.playerButtons) + 1) % sizes.size]) },
-            subtitle = "Size of the round buttons under live TV, movies and shows",
+            subtitle = "Size of the round buttons under live TV and recordings",
             value = vm.playerButtons.replaceFirstChar { it.uppercase() })
     }
-    item(key = "autoplay") { SettingRow("Autoplay next episode", { vm.updateAutoplay(!vm.autoplayNext) }, checked = vm.autoplayNext) }
-    header("Subtitles", "From the video itself, or from subtitle add-ons for On Demand titles. Pick one in the player's settings (Menu, or the gear).")
+    header("Subtitles", "Captions from the channel or recording itself. Pick one in the player's settings (Menu, or the gear).")
     item(key = "cc") { SettingRow("Subtitles", { vm.updateCaptions(!vm.captions) }, subtitle = "Turn on when there are any", checked = vm.captions) }
     item(key = "cc-preview") { SubtitlePreview(vm.subtitleStyle, Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) }
     subtitleStyleItems(vm, "s")

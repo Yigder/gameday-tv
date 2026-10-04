@@ -83,7 +83,6 @@ import com.gameday.tv.data.Tournament
 import com.gameday.tv.ui.theme.AppColors
 
 const val CARD_WIDTH = 216
-const val POSTER_WIDTH = 124
 
 /** Height of a row title, so pivot scrolling keeps the title of the focused row visible. */
 val ROW_TITLE = 38.dp
@@ -369,7 +368,7 @@ fun ChannelThumb(channel: Channel, program: Program?, now: Long = System.current
     }
 }
 
-/** Poster art (movies, shows) with a text fallback. */
+/** Artwork with a text fallback. */
 @Composable
 fun PosterThumb(image: String?, title: String) {
     var failed by remember(image) { mutableStateOf(false) }
@@ -400,10 +399,6 @@ data class HeroInfo(
     val channel: Channel? = null,
     val progress: Float? = null,
     val tournament: Tournament? = null,
-    /** Title art (a transparent logo) shown instead of the title text — On Demand. */
-    val logo: String? = null,
-    /** "7.8" (IMDb), shown as a badge — On Demand. */
-    val rating: String? = null,
 )
 
 /**

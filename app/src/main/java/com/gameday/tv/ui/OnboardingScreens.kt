@@ -159,8 +159,8 @@ fun ProviderScreen(vm: AppViewModel, onboarding: Boolean, editId: String? = null
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                "Sign in with the details your IPTV provider gave you. GameDay TV uses them to show your channels, guide, " +
-                    "movies and shows, and to find the channel for every game.\n\nYour login is encrypted on this TV and only sent to your provider.",
+                "Sign in with the details your IPTV provider gave you. GameDay TV uses them to show your channels and guide, " +
+                    "and to find the channel for every game.\n\nYour login is encrypted on this TV and only sent to your provider.",
                 fontSize = 14.sp,
                 color = AppColors.TextDim,
                 lineHeight = 20.sp,
