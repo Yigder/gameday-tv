@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -192,7 +193,11 @@ fun playerButtonSizes(setting: String): Pair<Dp, Dp> = when (setting) {
     else -> 44.dp to 52.dp
 }
 
-/** Round icon button with its label shown underneath while focused (player controls). */
+/**
+ * Round icon button with its label shown underneath while focused (player controls). [badge] is
+ * drawn inside the icon (the seconds in YouTube TV's back / forward arrows). [transparent] buttons
+ * have no fill until focused (Nuvio's player).
+ */
 @Composable
 fun IconCircleButton(
     icon: ImageVector,
@@ -202,6 +207,8 @@ fun IconCircleButton(
     size: Dp = LocalButtonSize.current,
     active: Boolean = false,
     tint: Color? = null,
+    badge: String? = null,
+    transparent: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
     // Narrow columns keep the row compact; the focused label may spill past its column.
@@ -211,7 +218,11 @@ fun IconCircleButton(
             modifier = modifier.size(size).onFocusChanged { focused = it.isFocused },
             shape = ClickableSurfaceDefaults.shape(shape = CircleShape),
             colors = ClickableSurfaceDefaults.colors(
-                containerColor = if (active) Color(0x55FFFFFF) else Color(0x29FFFFFF),
+                containerColor = when {
+                    active -> Color(0x55FFFFFF)
+                    transparent -> Color.Transparent
+                    else -> Color(0x29FFFFFF)
+                },
                 contentColor = tint ?: AppColors.Text,
                 focusedContainerColor = Color.White,
                 focusedContentColor = Color.Black,
@@ -221,7 +232,19 @@ fun IconCircleButton(
             scale = ClickableSurfaceDefaults.scale(focusedScale = 1.08f),
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = label, modifier = Modifier.size(size * 0.48f))
+                if (badge == null) {
+                    Icon(icon, contentDescription = label, modifier = Modifier.size(size * 0.48f))
+                } else {
+                    // The arrow's circle is centered 1/24 below the icon's center.
+                    val iconSize = size * 0.66f
+                    Icon(icon, contentDescription = label, modifier = Modifier.size(iconSize))
+                    Text(
+                        badge,
+                        fontSize = (iconSize.value * 0.27f).sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.offset(y = iconSize / 24f),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(5.dp))

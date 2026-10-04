@@ -38,7 +38,7 @@ import com.gameday.tv.data.Tournament
 import com.gameday.tv.ui.theme.AppColors
 
 /*
- * Ready-made cards for the content types that appear across Home, Sports, Library and Search.
+ * Ready-made cards for the content types that appear across Sports, Live, Library and Search.
  * Each one remembers focus for its screen, feeds the hero header, and opens a menu on long press.
  */
 

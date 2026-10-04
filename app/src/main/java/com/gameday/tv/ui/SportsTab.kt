@@ -4,10 +4,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -19,18 +22,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.tv.material3.Text
 import com.gameday.tv.data.Channel
 import com.gameday.tv.data.FavoriteTeam
 import com.gameday.tv.data.Game
 import com.gameday.tv.data.GameState
 import com.gameday.tv.data.Leagues
 import com.gameday.tv.data.Tournament
+import com.gameday.tv.ui.theme.AppColors
 
 /** A card in a Sports row: team games and golf tournaments share the rows. */
 private sealed interface SportsItem {
@@ -48,7 +55,10 @@ private sealed interface SportsItem {
     }
 }
 
-/** Sports: sport chips across the top, then live / upcoming / final rows, teams and channels. */
+/**
+ * Sports, the first tab: sport chips across the top, then live / upcoming / final rows, ready-made
+ * multiviews, teams and channels.
+ */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun SportsTab(vm: AppViewModel) {
@@ -91,6 +101,11 @@ fun SportsTab(vm: AppViewModel) {
         }
     }
 
+    // Kept in the view model so the row is there at once when coming back (and focus returns to it).
+    val hasProvider = vm.catalog != null
+    val presets = vm.multiviewRow
+    LaunchedEffect(vm.games, vm.catalog, vm.favoriteChannelIds.size) { vm.multiviewRow = if (hasProvider) vm.multiviewPresets() else emptyList() }
+
     val first = live.firstOrNull() ?: upcoming.firstOrNull()
     val defaultHero = when (first) {
         is SportsItem.G -> heroFor(first.game, vm.hideScores)
@@ -122,8 +137,17 @@ fun SportsTab(vm: AppViewModel) {
         Box(Modifier.weight(1f)) {
             PivotScroll(offset = ROW_TITLE) {
                 LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(top = 8.dp, bottom = 260.dp)) {
+                    if (!hasProvider) {
+                        item(key = "provider") { ProviderBanner(vm) }
+                    }
                     if (live.isNotEmpty()) {
                         cardRow("live", "Live now", nav) { sportsItems(vm, live, screenKey, onHero, "l:") }
+                    }
+                    if (filter == "all" && presets.isNotEmpty()) {
+                        cardRow("mv", "Watch in Multiview", nav) {
+                            items(presets, key = { it.key }) { PresetCard(vm, it, screenKey, onHero) }
+                            item(key = "build") { MoreCard("Build your own", { vm.multiviewWith(null) }) }
+                        }
                     }
                     if (upcoming.isNotEmpty()) {
                         cardRow("upcoming", "Upcoming", nav) { sportsItems(vm, upcoming.take(40), screenKey, onHero, "u:") }
@@ -172,5 +196,27 @@ private fun androidx.compose.foundation.lazy.LazyListScope.sportsItems(
             is SportsItem.G -> GameCard(vm, item.game, screenKey, onHero, prefix)
             is SportsItem.T -> TournamentCard(vm, item.t, screenKey, onHero)
         }
+    }
+}
+
+@Composable
+private fun ProviderBanner(vm: AppViewModel) {
+    Row(Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Connect your TV provider to watch", fontSize = 18.sp)
+            Text(
+                when (val s = vm.iptv) {
+                    is IptvStatus.Failed -> s.message
+                    IptvStatus.Loading -> "Connecting to your provider…"
+                    else -> "Add your IPTV login to watch games, browse the guide, record, and use Multiview."
+                },
+                fontSize = 13.sp,
+                color = AppColors.TextDim,
+            )
+        }
+        Spacer(Modifier.width(16.dp))
+        if (vm.iptv is IptvStatus.Failed) PillButton("Retry", { vm.reloadChannels() })
+        Spacer(Modifier.width(10.dp))
+        PillButton("Set up provider", { vm.navigate(Screen.Provider()) }, primary = true)
     }
 }

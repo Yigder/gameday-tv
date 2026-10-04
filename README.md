@@ -1,8 +1,19 @@
 # GameDay TV
 
-A live TV and sports app for Android TV, built around **your IPTV service** and designed to work like YouTube TV. It has Home, Sports, Live and Library tabs, a program guide, a DVR, Multiview, movies and shows, profiles, and live scores for every game. Pick a game and it finds the channel in your lineup that's showing it.
+A live TV and sports app for Android TV, built around **your IPTV service** and designed to work like YouTube TV. It has Sports, Live, On Demand and Library tabs, a program guide, a DVR, Multiview, movies and shows, profiles, and live scores for every game. Pick a game and it finds the channel in your lineup that's showing it.
 
 **Install on Fire TV / Android TV:** open the [Downloader](https://www.aftvnews.com/downloader/) app and enter code **`3558070`**. It always fetches the [latest release](https://github.com/Yigder/gameday-tv/releases/latest).
+
+## What's new in 2.4
+
+- **No more Home tab.** The app opens on Sports, which now also has the "Connect your TV provider" banner and the ready-made **Watch in Multiview** row. Back from another tab returns to Sports.
+- **On Demand looks like Nuvio's home:** the highlighted title fills the top of the screen (backdrop, logo, IMDb rating, year, genres and description) above rows of posters. Continue watching, Your list, your add-on catalogs, and your provider's movies and shows (moved here from Home) are all on this tab.
+- **Trailer previews.** Rest on a poster and it widens into the title's backdrop and plays its trailer, like Nuvio. Title pages play the trailer behind the details after a moment. Choose muted (the default), with sound or off in Settings › Playback › Trailer previews. Trailers come from the add-ons' YouTube links; when YouTube won't stream one, the card just shows its art.
+- **Movie and show player like Nuvio's:** title and episode at the bottom, a full-width progress bar (◀ ▶ scrub, faster when held), and a row of buttons: play/pause, next episode, subtitles, audio, sources (switch to another source of an add-on title without losing your place), episodes, and More (speed, picture size, settings). The clock and "Ends at" sit in the top-right corner.
+- **Live TV player:**
+  - A **LIVE** button: red while you're watching live; grey when you're behind (paused, rewound, or in catch-up), and pressing it jumps back to live.
+  - A **catch-up** button on channels with catch-up: start the current program over, or replay an earlier one from the provider's archive.
+  - Back / forward are YouTube TV's circular arrows with the seconds inside (10 and 30). They also work on live streams that have a rewind window.
 
 ## What's new in 2.3
 
@@ -98,8 +109,9 @@ Upgrading from 1.x? Create your account, and setup offers to reuse the IPTV logi
 | Button | Action |
 |---|---|
 | OK | Show the controls and the score (or retry after an error) |
-| ◀ / ▶ (controls hidden) | Back 10 s / forward 30 s in movies and recordings |
-| ▲ (controls hidden) | Show or hide the score bug (nothing else) |
+| ◀ / ▶ (controls hidden) | Back 10 s / forward 30 s in movies, recordings, catch-up and live streams with a rewind window |
+| ◀ / ▶ (on the progress bar) | Scrub; hold to go faster |
+| ▲ (controls hidden) | Live TV: show or hide the score bug (nothing else). Movies and shows: show the controls |
 | ▼ (controls hidden) | Show the controls |
 | CH+ / CH− | Next / previous channel |
 | Info / Guide / Red / Green | Show or hide the score bug |
@@ -160,7 +172,7 @@ They cover:
 - password hashing
 - multiview rules
 - the OK-key gate
-- add-on manifests, catalogs, details and sources
+- add-on manifests, catalogs, details, sources and trailers
 - subtitles (SubRip, WebVTT, SSA/ASS, encodings, languages, timing) and search ranking
 - TorBox responses and picking the right file from a season pack
 - the score delay
@@ -190,6 +202,7 @@ app/src/main/java/com/gameday/tv/
     Providers.kt               several providers per account, provider-scoped ids
     Addons.kt                  Stremio add-on protocol: manifests, catalogs, details, sources
     TorBox.kt                  TorBox: cache check, add torrent, pick file, stream link
+    Trailers.kt                YouTube trailer ids → a stream the player can play
     ScoreDelay.kt              delayed score history for the score bug and alerts
     Subtitles.kt               subtitle add-ons, subtitle file parsing, languages, style
     Xmltv.kt                   streaming XMLTV guide parser
@@ -202,15 +215,17 @@ app/src/main/java/com/gameday/tv/
   ui/
     AppViewModel.kt            session, profiles, scores, provider, guide, VOD, playback, DVR, search
     MainShell.kt               top bar, tabs, live video behind the menus
-    HomeTab.kt, SportsTab.kt, LiveTab.kt, LibraryTab.kt, SearchScreen.kt, SettingsScreen.kt
-    OnDemandScreens.kt         On Demand tab, title pages, source picker, add-on and TorBox setup
+    SportsTab.kt, LiveTab.kt, LibraryTab.kt, SearchScreen.kt, SettingsScreen.kt
+    OnDemandTab.kt             On Demand tab (Nuvio-style header, expanding posters)
+    OnDemandScreens.kt         title pages, "See all", source picker, add-on and TorBox setup
+    TrailerPreview.kt          trailer player for On Demand cards and title pages
     AddonsModel.kt             add-on and TorBox state for an account
     PhoneInput.kt              "send from your phone" page and QR code
     DisplayModes.kt            smooth motion (fastest refresh rate)
     AuthScreens.kt, OnboardingScreens.kt, ProfileScreens.kt
     SportsDetailScreens.kt     game, golf tournament and team pages
     MediaDetailScreens.kt      channel, movie, show and browse pages
-    PlayerScreen.kt            YouTube TV-style player, stats and settings panels
+    PlayerScreen.kt            player: YouTube TV-style for live TV, Nuvio-style for movies and shows; side panels
     SubtitleUi.kt              subtitle drawing, style options and preview
     OnDemandSearch.kt          On Demand search with suggestions as you type
     MultiviewScreen.kt, MultiviewBuilderScreen.kt

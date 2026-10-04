@@ -27,8 +27,6 @@ object Icons {
     }
     val Info by lazy { icon("info", "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z") }
     val Restart by lazy { icon("restart", "M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z") }
-    val Rewind by lazy { icon("rewind", "M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z") }
-    val Forward by lazy { icon("forward", "M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z") }
     val Multiview by lazy { icon("multiview", "M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z") }
     val Stats by lazy { icon("stats", "M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z") }
     val Captions by lazy {
@@ -66,5 +64,16 @@ object Icons {
     val Guide by lazy { icon("guide", "M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z") }
     val Refresh by lazy { icon("refresh", "M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z") }
     val Audio by lazy { icon("audio", "M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z") }
+    /** Circular "back" arrow; the player draws the seconds inside it, like YouTube TV. */
+    val Replay by lazy { icon("replay", "M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z") }
+    /** Circular "forward" arrow (the mirror of [Replay]). */
+    val ForwardArrow by lazy { icon("forward_arrow", "M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z") }
+    val History by lazy { icon("history", "M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z") }
+    val Subtitles by lazy { icon("subtitles", "M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM4 12h4v2H4v-2zm10 6H4v-2h10v2zm6 0h-4v-2h4v2zm0-4H10v-2h10v2z") }
+    val Sources by lazy { icon("sources", "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z") }
+    val Speed by lazy { icon("speed", "M20.38 8.57l-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.27-10.44zm-9.79 6.84a2 2 0 0 0 2.83 0l5.66-8.49-8.49 5.66a2 2 0 0 0 0 2.83z") }
+    val AspectRatio by lazy { icon("aspect", "M19 12h-2v3h-3v2h5v-5zM7 9h3V7H5v5h2V9zm14-6H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16.01H3V4.99h18v14.02z") }
+    val Episodes by lazy { icon("episodes", "M19 9H2v2h17V9zm0-4H2v2h17V5zM2 15h13v-2H2v2zm15-2v6l5-3-5-3z") }
+    val ChevronLeft by lazy { icon("chevron_left", "M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z") }
     val Live by lazy { icon("live_dot", "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM4.93 4.93l1.41 1.41C4.9 7.79 4 9.79 4 12s.9 4.21 2.34 5.66l-1.41 1.41C3.12 17.26 2 14.76 2 12s1.12-5.26 2.93-7.07zm14.14 0C20.88 6.74 22 9.24 22 12s-1.12 5.26-2.93 7.07l-1.41-1.41C19.1 16.21 20 14.21 20 12s-.9-4.21-2.34-5.66l1.41-1.41z") }
 }

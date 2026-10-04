@@ -57,14 +57,13 @@ private data class VideoFrame(val widthFraction: Float, val height: Dp)
 
 private fun videoFrameFor(tab: Tab): VideoFrame? = when (tab) {
     // Down to where the first row (or the filter chips) begins.
-    Tab.HOME -> VideoFrame(0.6f, 268.dp)
     Tab.SPORTS -> VideoFrame(0.6f, 250.dp)
     Tab.LIVE -> VideoFrame(0.42f, 214.dp)
     // On Demand shows each title's art, and the library has no header.
     Tab.ON_DEMAND, Tab.LIBRARY -> null
 }
 
-/** Home / Sports / Live / On Demand / Library with the YouTube TV-style top bar. */
+/** Sports / Live / On Demand / Library with the YouTube TV-style top bar. */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
@@ -81,8 +80,8 @@ fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
 
     BackHandler(enabled = vm.dialog == null) {
         when {
-            tab != Tab.HOME -> {
-                vm.selectTab(Tab.HOME)
+            tab != Tab.FIRST -> {
+                vm.selectTab(Tab.FIRST)
             }
             System.currentTimeMillis() - lastBack < 2_500 -> (context as? Activity)?.finish()
             else -> {
@@ -99,7 +98,6 @@ fun MainShell(vm: AppViewModel, stateHolder: SaveableStateHolder) {
 
         stateHolder.SaveableStateProvider("main:$tab") {
             when (tab) {
-                Tab.HOME -> HomeTab(vm)
                 Tab.SPORTS -> SportsTab(vm)
                 Tab.LIVE -> LiveTab(vm)
                 Tab.ON_DEMAND -> OnDemandTab(vm)
@@ -195,7 +193,7 @@ private fun TabButton(label: String, selected: Boolean, onFocused: () -> Unit, o
     var focused by remember { mutableStateOf(false) }
     var byViewer by remember { mutableStateOf(false) }
     // Like YouTube TV, resting on a tab opens it — but only when the viewer moved there. When a
-    // menu closes and Android parks focus on the first tab, that mustn't switch to Home.
+    // menu closes and Android parks focus on the first tab, that mustn't switch tabs.
     LaunchedEffect(focused, byViewer) {
         if (focused && byViewer && !selected) {
             delay(350)

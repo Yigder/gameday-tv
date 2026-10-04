@@ -66,94 +66,8 @@ import com.gameday.tv.ui.theme.AppColors
 import kotlinx.coroutines.launch
 
 // ---------------------------------------------------------------------------------------------
-// On Demand tab: movies and shows from streaming add-ons (Stremio add-on protocol, like Nuvio)
+// On Demand pages: "See all", title pages, sources, add-on setup. The tab itself is in OnDemandTab.kt.
 // ---------------------------------------------------------------------------------------------
-
-@OptIn(ExperimentalComposeUiApi::class)
-@Composable
-fun OnDemandTab(vm: AppViewModel) {
-    val screenKey = "main:${Tab.ON_DEMAND}"
-    var kind by rememberSaveable { mutableStateOf("all") }
-    val chips = remember { FocusRequester() }
-    val selectedChip = remember { FocusRequester() }
-    if (vm.tabWantsFocus) InitialFocus(vm, screenKey, chips)
-    val onHero: (HeroInfo) -> Unit = { vm.heroFocus = it }
-    val listState = rememberLazyListState()
-    val nav = rememberRowNav(listState)
-
-    val addons = vm.addons
-    val rows = addons.rows.filter { kind == "all" || it.catalog.type == kind }
-    val items = addons.rowItems
-    val failed = addons.rowFailed
-    LaunchedEffect(rows.map { it.key }) { rows.forEach { addons.ensureRow(it) } }
-    val resume by remember { derivedStateOf { vm.resume.filter { it.key.startsWith("addon:") } } }
-    val saved by remember { derivedStateOf { vm.saved.filter { it.kind == SavedKind.ADDON_MOVIE || it.kind == SavedKind.ADDON_SERIES } } }
-
-    val defaultHero = HeroInfo("On Demand", listOf("Movies and shows from your add-ons"),
-        if (addons.hasStreamAddons) null else "Add a streaming add-on in Settings › Add-ons to play titles.")
-
-    Column(Modifier.fillMaxSize()) {
-        TabHero(vm, defaultHero, Modifier.fillMaxWidth().height(270.dp).padding(top = 64.dp), compact = true)
-        LazyRow(
-            Modifier.focusRequester(chips).focusRestorer(selectedChip),
-            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            listOf("all" to "All", "movie" to "Movies", "series" to "Shows").forEach { (k, label) ->
-                item(key = k) {
-                    Chip(label, kind == k, { kind = k; vm.heroFocus = null }, if (kind == k) Modifier.focusRequester(selectedChip) else Modifier)
-                }
-            }
-            item(key = "search") { Chip("Search", false, { vm.navigate(Screen.OnDemandSearch) }, icon = Icons.Search) }
-            item(key = "manage") { Chip("Add-ons", false, { vm.openSettings(SettingsSection.ADDONS) }, icon = Icons.Settings) }
-        }
-        Box(Modifier.weight(1f)) {
-            PivotScroll(offset = ROW_TITLE) {
-                LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(top = 8.dp, bottom = 260.dp)) {
-                    if (addons.installed.isEmpty()) {
-                        item(key = "none") {
-                            EmptyState("No add-ons yet", "Add Stremio-compatible add-ons (catalogs like Cinemeta, sources like Comet) to browse and stream movies and shows.") {
-                                PillButton("Add an add-on", { vm.navigate(Screen.AddonInstall) }, primary = true)
-                            }
-                        }
-                    } else if (!addons.hasStreamAddons) {
-                        item(key = "nostreams") {
-                            Row(Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Add a source to start watching", fontSize = 17.sp)
-                                    Text("Catalogs show what's available. A streaming add-on such as Comet (with TorBox) plays it.", fontSize = 13.sp, color = AppColors.TextDim)
-                                }
-                                PillButton("Add an add-on", { vm.navigate(Screen.AddonInstall) }, primary = true)
-                            }
-                        }
-                    }
-                    if (resume.isNotEmpty()) {
-                        cardRow("resume", "Continue watching", nav) {
-                            items(resume, key = { "r:" + it.key }) { ResumeCard(vm, it, screenKey, onHero) }
-                        }
-                    }
-                    if (saved.isNotEmpty()) {
-                        cardRow("saved", "Your list", nav) {
-                            items(saved, key = { it.key }) { SavedCard(vm, it, screenKey) }
-                        }
-                    }
-                    rows.forEach { row ->
-                        val list = items[row.key]
-                        if (!list.isNullOrEmpty()) {
-                            cardRow(row.key, row.title, nav) {
-                                items(list, key = { "m:" + it.type + it.id }) { AddonCard(vm, it, screenKey, onHero, row.key) }
-                                item(key = "more") { MoreCard("See all", { vm.navigate(Screen.AddonBrowse(row.key)) }, POSTER_WIDTH, 2f / 3f) }
-                            }
-                        }
-                    }
-                    if (rows.isNotEmpty() && rows.none { items[it.key] != null || failed[it.key] == true }) {
-                        item(key = "loading") { LoadingState("Loading catalogs…") }
-                    }
-                }
-            }
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------------------------
 // "See all" for one catalog, with genres and more pages as you scroll
@@ -282,7 +196,11 @@ fun AddonDetailScreen(vm: AppViewModel, type: String, id: String) {
                         if (isSeries && seasons.isNotEmpty()) "${seasons.count { it > 0 }} season${if (seasons.count { it > 0 } == 1) "" else "s"}" else null,
                     ),
                     description = p.description,
-                    art = { AsyncImage(p.background ?: p.poster, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) },
+                    art = {
+                        AsyncImage(p.background ?: p.poster, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        // Like Nuvio, the trailer takes over the art after a moment (not while choosing a source).
+                        TrailerPreview(vm, "detail:$type:${p.id}", p.trailers, active = !picking, modifier = Modifier.fillMaxSize(), delayMs = 2_500)
+                    },
                 ) {
                     when {
                         resume != null && (!isSeries || resumeVideo != null) -> PillButton(
@@ -416,7 +334,7 @@ private fun StreamSheet(vm: AppViewModel, meta: MetaDetail, video: MetaVideo?, o
 }
 
 @Composable
-private fun StreamRow(s: AddonStream, cached: Boolean, torbox: Boolean, modifier: Modifier, onClick: () -> Unit) {
+internal fun StreamRow(s: AddonStream, cached: Boolean, torbox: Boolean, modifier: Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     FocusSurface(
         onClick = onClick,

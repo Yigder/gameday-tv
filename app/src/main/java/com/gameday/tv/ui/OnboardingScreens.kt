@@ -56,13 +56,13 @@ fun OnboardingScreen(vm: AppViewModel, step: Int) {
         1 -> StepFrame(
             step = 2,
             title = "What do you like to watch?",
-            subtitle = "Pick your sports. They'll fill your Home and Sports tabs, and you can change them anytime in Settings.",
+            subtitle = "Pick your sports. They'll fill your Sports tab, and you can change them anytime in Settings.",
             next = { vm.finishOnboardingStep(1) },
         ) { SportsPicker(vm, Modifier.fillMaxSize()) }
         else -> StepFrame(
             step = 3,
             title = "Add your teams",
-            subtitle = "Teams you add get their own row on Home, score alerts, and can be recorded automatically.",
+            subtitle = "Teams you add get their own filter in Sports, score alerts, and can be recorded automatically.",
             next = { vm.finishOnboardingStep(2) },
             nextLabel = "Done",
         ) { TeamsPicker(vm, Modifier.fillMaxSize()) }

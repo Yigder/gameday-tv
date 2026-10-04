@@ -362,7 +362,7 @@ private fun LazyListScope.sportsSection(vm: AppViewModel) {
                 else -> "${vm.scoreDelaySec} s"
             })
     }
-    header("Your teams", "Teams you add get a Home row, alerts, and optional automatic recording.")
+    header("Your teams", "Teams you add get a \"Your teams\" filter in Sports, alerts, and optional automatic recording.")
     items(vm.favorites.toList(), key = { "t:" + it.key }) { t ->
         SettingRow(
             title = t.name,
@@ -438,8 +438,19 @@ private fun LazyListScope.playbackSection(vm: AppViewModel) {
         val modes = listOf("sound", "muted", "off")
         val next = modes[(modes.indexOf(vm.backgroundVideo).coerceAtLeast(0) + 1) % modes.size]
         SettingRow("Live TV behind the menus", { vm.updateBackgroundVideo(next) },
-            subtitle = "Like YouTube TV: what you were watching keeps playing at the top of Home, Sports and Live, and previews the channel you rest on.",
+            subtitle = "Like YouTube TV: what you were watching keeps playing at the top of Sports and Live, and previews the channel you rest on.",
             value = when (vm.backgroundVideo) {
+                "sound" -> "With sound"
+                "muted" -> "Muted"
+                else -> "Off"
+            })
+    }
+    item(key = "trailers") {
+        val modes = listOf("muted", "sound", "off")
+        val next = modes[(modes.indexOf(vm.trailerPreviews).coerceAtLeast(0) + 1) % modes.size]
+        SettingRow("Trailer previews", { vm.updateTrailerPreviews(next) },
+            subtitle = "Like Nuvio: resting on a movie or show in On Demand opens it wide and plays its trailer.",
+            value = when (vm.trailerPreviews) {
                 "sound" -> "With sound"
                 "muted" -> "Muted"
                 else -> "Off"

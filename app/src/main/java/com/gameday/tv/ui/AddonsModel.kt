@@ -67,8 +67,8 @@ class AddonsModel(private val vm: AppViewModel) {
     private val metaCache = HashMap<String, MetaDetail>()
 
     /**
-     * Titles of each catalog row, kept here (not in the screen) so coming back to On Demand or
-     * Home finds them immediately and focus returns to the same poster.
+     * Titles of each catalog row, kept here (not in the screen) so coming back to On Demand
+     * finds them immediately and focus returns to the same poster.
      */
     val rowItems = mutableStateMapOf<String, List<MetaPreview>>()
     val rowFailed = mutableStateMapOf<String, Boolean>()
@@ -87,7 +87,7 @@ class AddonsModel(private val vm: AppViewModel) {
     val enabled: List<InstalledAddon> get() = installed.filter { it.enabled }
     val hasStreamAddons: Boolean get() = enabled.any { it.hasStreams }
 
-    /** Rows for Home and On Demand: every catalog that works without a search or genre. */
+    /** Rows for On Demand: every catalog that works without a search or genre. */
     val rows: List<AddonRow>
         get() = enabled.flatMap { a -> a.manifest.catalogs.filter { !it.needsExtra }.map { AddonRow(a, it) } }
 
