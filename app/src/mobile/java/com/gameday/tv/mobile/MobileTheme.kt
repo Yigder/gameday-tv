@@ -1,6 +1,8 @@
 package com.gameday.tv.mobile
 
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -41,7 +43,9 @@ fun MobileTheme(content: @Composable () -> Unit) {
                 error = AppColors.Live,
                 onError = Color.White,
             ),
-            content = content,
-        )
+        ) {
+            // Text outside a Material surface otherwise defaults to black (unreadable on this dark canvas).
+            CompositionLocalProvider(LocalContentColor provides AppColors.Text, content = content)
+        }
     }
 }
