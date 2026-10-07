@@ -244,7 +244,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun signIn(email: String, password: String): String? {
         if (email.isBlank() || password.isEmpty()) return "Enter your email and password."
         val acct = accountStore.verify(email, password)
-            ?: return if (accountStore.hasEmail(email)) "Wrong password. Try again." else "No account with that email on this TV. Create one instead."
+            ?: return if (accountStore.hasEmail(email)) "Wrong password. Try again." else "No account with that email on this ${com.gameday.tv.data.Device.noun}. Create one instead."
         accountStore.currentId = acct.id
         enterAccount(acct)
         return null

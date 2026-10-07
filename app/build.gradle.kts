@@ -21,8 +21,22 @@ android {
         applicationId = "com.gameday.tv"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "2.5.1"
+        versionCode = 10
+        versionName = "2.6"
+    }
+
+    // Two apps from one codebase: the Android TV / Fire TV app (unchanged id, so it updates in place)
+    // and the phone/tablet app, which shares the data, player and view model but has a touch UI.
+    flavorDimensions += "device"
+    productFlavors {
+        create("tv") {
+            dimension = "device"
+            isDefault = true
+        }
+        create("mobile") {
+            dimension = "device"
+            applicationIdSuffix = ".mobile"
+        }
     }
 
     signingConfigs {
@@ -72,6 +86,8 @@ dependencies {
 
     // Compose for TV
     implementation("androidx.tv:tv-material:1.1.0")
+    // Touch components for the phone/tablet app.
+    "mobileImplementation"("androidx.compose.material3:material3")
 
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")

@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 GameDay TV: an Android TV / Fire TV app (Kotlin, Jetpack Compose + Compose for TV, Media3/ExoPlayer) that plays the user's own IPTV service (Xtream Codes or M3U) with a YouTube TV-style UI, ESPN live scores, game→channel matching, DVR and Multiview. It's focused on sports and live TV (there is no On Demand / VOD). Single Gradle module `:app`, package `com.gameday.tv`. There is no backend: accounts, profiles and settings live on the device.
 
+Two apps come from the one module as product flavors (dimension `device`): `tv` (app id `com.gameday.tv`, the default) and `mobile` (phones/tablets, app id `com.gameday.tv.mobile`, label "GameDay"). `src/main` holds everything shared — data, DVR, `AppViewModel`, the player controller, and the TV screens. `src/tv` has only `MainActivity` and the leanback manifest. `src/mobile/java/com/gameday/tv/mobile/` is the touch UI (Material 3, `mobileImplementation` only), which reuses the view model, menus (`Menus.kt` dialogs render as bottom sheets), card artwork, score bugs and `StreamController`. Shared code must not reference `MainActivity` (use `getLaunchIntentForPackage`); device wording in shared messages comes from `data/Device.kt` ("TV" / "device").
+
 The README is the user-facing changelog and feature spec (including the remote-control key tables). When behavior changes, update the "What's new" section and the key tables there.
 
 ## Commands
@@ -13,14 +15,17 @@ The README is the user-facing changelog and feature spec (including the remote-c
 Requires JDK 17+ and the Android SDK (compileSdk 37, minSdk 26).
 
 ```
-gradlew.bat assembleRelease            # → app/build/outputs/apk/release/app-release.apk
-gradlew.bat assembleDebug
-gradlew.bat testDebugUnitTest          # all JVM unit tests
-gradlew.bat testDebugUnitTest --tests "com.gameday.tv.data.ChannelMatcherTest"
-gradlew.bat testDebugUnitTest --tests "com.gameday.tv.data.M3uParserTest.someTestName"
-gradlew.bat lintDebug
-adb install -r app/build/outputs/apk/release/app-release.apk
+gradlew.bat assembleTvRelease          # → app/build/outputs/apk/tv/release/app-tv-release.apk
+gradlew.bat assembleMobileRelease      # → app/build/outputs/apk/mobile/release/app-mobile-release.apk
+gradlew.bat assembleTvDebug assembleMobileDebug
+gradlew.bat testTvDebugUnitTest        # all JVM unit tests (they only touch shared code)
+gradlew.bat testTvDebugUnitTest --tests "com.gameday.tv.data.ChannelMatcherTest"
+gradlew.bat testTvDebugUnitTest --tests "com.gameday.tv.data.M3uParserTest.someTestName"
+gradlew.bat lintTvDebug lintMobileDebug
+adb install -r app/build/outputs/apk/tv/release/app-tv-release.apk
 ```
+
+When changing shared code, compile both flavors (`compileTvDebugKotlin compileMobileDebugKotlin`). If Gradle can't find the SDK, set `ANDROID_HOME` (e.g. `%LOCALAPPDATA%\Android\Sdk`).
 
 Release builds are minified (R8) and signed with `~/.gameday-tv/keystore.properties` (overridable with `-PgamedayKeystore=<path>`); without that file they fall back to the debug key.
 
@@ -57,6 +62,6 @@ Credentials and endpoints are in `tools/mock-xtream/README.md`.
 
 - Session naming: at the start of every session in this repo, rename the session (Claude Code desktop: `set_session_title` with `"self"`) to the app version it works on, from `versionName` in `app/build.gradle.kts`, as `major.minor` (e.g. "2.4"). If a session spans a version bump, use a range ("2.4 - 2.5").
 
-- This is a TV app: everything must be reachable with the D-pad, and focus behavior (where focus lands on open and on Back) is treated as a feature. Check focus restore when adding screens or rows.
+- The `tv` flavor is a TV app: everything must be reachable with the D-pad, and focus behavior (where focus lands on open and on Back) is treated as a feature. Check focus restore when adding screens or rows.
 - User-facing text is plain, short sentences in YouTube TV / Nuvio terms. The README is written the same way.
 - Cleartext HTTP is intentionally enabled (most IPTV panels are http-only). `data/Http.kt` holds the shared OkHttp client, so the User-Agent is the same everywhere; reuse it rather than creating new clients.

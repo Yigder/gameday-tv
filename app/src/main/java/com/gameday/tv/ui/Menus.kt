@@ -144,7 +144,7 @@ fun recordMenu(vm: AppViewModel, channel: Channel) {
             add(DialogAction("For ${durationText(m * 60_000L)}", Icons.Clock) { vm.dismissDialog(); vm.recordNow(channel, m) })
         }
     }
-    vm.showDialog(AppDialog("Record ${cleanChannelName(channel.name)}", "Saved to your library on this TV", actions = actions))
+    vm.showDialog(AppDialog("Record ${cleanChannelName(channel.name)}", "Saved to your library on this ${com.gameday.tv.data.Device.noun}", actions = actions))
 }
 
 /** A guide entry: watch it now, replay it, or record it. */

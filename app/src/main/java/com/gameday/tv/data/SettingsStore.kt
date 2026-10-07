@@ -30,7 +30,7 @@ class AccountStore(private val context: Context) {
         require(n.isNotEmpty()) { "Enter your name." }
         require(EMAIL.matches(e)) { "Enter a valid email address." }
         require(password.length >= 8) { "Use at least 8 characters for your password." }
-        require(rawAccounts().none { it.first.email == e }) { "An account with this email is already on this TV. Sign in instead." }
+        require(rawAccounts().none { it.first.email == e }) { "An account with this email is already on this ${Device.noun}. Sign in instead." }
         val hash = withContext(Dispatchers.Default) { PasswordHasher.hash(password) }
         val account = AppAccount(UUID.randomUUID().toString(), n, e, System.currentTimeMillis())
         save(rawAccounts() + (account to hash))
