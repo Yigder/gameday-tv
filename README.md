@@ -4,6 +4,12 @@ A live TV and sports app for Android TV, built around **your IPTV service** and 
 
 **Install on Fire TV / Android TV:** open the [Downloader](https://www.aftvnews.com/downloader/) app and enter code **`3558070`**. It always fetches the [latest release](https://github.com/Yigder/gameday-tv/releases/latest).
 
+There's also a **phone and tablet app** (GameDay) with the same features and touch controls. It's a separate app, so it installs next to the TV app instead of replacing it.
+
+## What's new in 2.6
+
+- **GameDay for phones and tablets.** A new app built from the same code as the TV app: Sports, Live and Library tabs at the bottom, game and team pages, the guide as a list of what's on now and next, recordings, Multiview, profiles and Settings. Sign in with the same kind of account (accounts stay on each device). The player turns to landscape, and keeps playing in picture-in-picture when you leave the app. See [On phones and tablets](#on-phones-and-tablets).
+
 ## What's new in 2.5
 
 - **RedZone card in Live now.** While NFL games are live, Sports › Live now starts with an NFL RedZone card that plays your best RedZone channel.
@@ -166,6 +172,26 @@ Upgrading from 1.x? Create your account, and setup offers to reuse the IPTV logi
 
 Each Multiview screen is a separate stream, so 4 screens need 4 connections from your provider (a channel carried on from full screen keeps its one connection). The builder only lets you pick as many as your plan allows.
 
+## On phones and tablets
+
+The phone app has the TV app's features with touch controls:
+
+| Where | Do this | What happens |
+|---|---|---|
+| Any card or channel | Tap | Live games and channels play; anything else opens its page |
+| Any card or channel | Press and hold | Its menu: watch, record, Multiview, favorites, schedule |
+| Sports | Pull down | Refresh scores |
+| Player | Tap | Show or hide the controls |
+| Player | Swipe left / right | Next / previous channel in the list |
+| Player | Double-tap the left / right side | Back 10 s / forward 30 s (recordings and catch-up) |
+| Player | Press and hold | Multiview with this channel |
+| Player | Trophy button | Show or hide the score bug |
+| Player | Home or swipe up | Keep watching in picture-in-picture |
+| Multiview | Tap a screen | Hear that screen (or add a channel to an empty one) |
+| Multiview | Press and hold a screen | Full screen, change channel, remove, video decoding |
+
+After you leave the player, what you were watching keeps playing in a mini player above the tabs (Settings › Playback › Mini player: with sound, muted or off). Tap it to go back to full screen.
+
 ## Recordings
 
 - Recordings are saved in the app's storage on the TV. Set a space limit and how long to keep them under **Settings › Recordings**.
@@ -183,18 +209,19 @@ Each Multiview screen is a separate stream, so 4 screens need 4 connections from
 
 ## Building
 
-Requirements: JDK 17+ and the Android SDK (compileSdk 37). Build with:
+Requirements: JDK 17+ and the Android SDK (compileSdk 37). There are two apps (product flavors) from one codebase: `tv` (Android TV / Fire TV, app id `com.gameday.tv`) and `mobile` (phones and tablets, app id `com.gameday.tv.mobile`). Build with:
 
 ```
-gradlew.bat assembleRelease
+gradlew.bat assembleTvRelease
+gradlew.bat assembleMobileRelease
 ```
 
-Output: `app/build/outputs/apk/release/app-release.apk`. Release builds are signed with the key from `~/.gameday-tv/keystore.properties` when it exists, otherwise with the debug key.
+Output: `app/build/outputs/apk/tv/release/app-tv-release.apk` and `app/build/outputs/apk/mobile/release/app-mobile-release.apk`. Release builds are signed with the key from `~/.gameday-tv/keystore.properties` when it exists, otherwise with the debug key.
 
 To run the unit tests:
 
 ```
-gradlew.bat testDebugUnitTest
+gradlew.bat testTvDebugUnitTest
 ```
 
 They cover:
@@ -219,14 +246,22 @@ They cover:
 
 ```
 adb connect <tv-ip-address>
-adb install -r app/build/outputs/apk/release/app-release.apk
+adb install -r app/build/outputs/apk/tv/release/app-tv-release.apk
 ```
+
+On a phone (USB debugging on): `adb install -r app/build/outputs/apk/mobile/release/app-mobile-release.apk`.
 
 ## Project layout
 
 ```
-app/src/main/java/com/gameday/tv/
-  MainActivity.kt              entry point, screen routing, dialogs, toasts
+app/src/tv/java/com/gameday/tv/
+  MainActivity.kt              TV entry point, screen routing, dialogs, toasts, remote keys
+app/src/mobile/java/com/gameday/tv/mobile/
+  MobileActivity.kt            phone entry point, screen routing, landscape + picture-in-picture for video
+  MobileMain.kt                tab bar, mini player, Sports / Live / Library
+  MobilePlayer.kt, MobileMultiview.kt, MobileDetails.kt, MobileSettings.kt
+  MobileAuth.kt, MobileSetup.kt, MobileComponents.kt, MobileTheme.kt
+app/src/main/java/com/gameday/tv/   shared by both apps (the TV screens live here too)
   data/
     Models.kt                  channels, guide, games, accounts, recordings
     SettingsStore.kt           accounts (PBKDF2), per-account and per-profile settings, 1.x import

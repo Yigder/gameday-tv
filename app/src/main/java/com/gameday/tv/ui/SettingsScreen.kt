@@ -402,7 +402,7 @@ private fun LazyListScope.playbackSection(vm: AppViewModel) {
 
 @Composable
 private fun SmoothMotionRow() {
-    val activity = LocalContext.current as? android.app.Activity ?: return
+    val activity = androidx.activity.compose.LocalActivity.current ?: return
     var on by remember { mutableStateOf(DisplayModes.enabled(activity)) }
     var detail by remember { mutableStateOf(DisplayModes.describe(activity)) }
     SettingRow(

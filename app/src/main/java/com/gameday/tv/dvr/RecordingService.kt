@@ -14,7 +14,6 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import com.gameday.tv.MainActivity
 import com.gameday.tv.R
 import com.gameday.tv.data.GameState
 import com.gameday.tv.data.Leagues
@@ -143,7 +142,7 @@ class RecordingService : Service() {
             val bytes = file.length()
             RecordingStore.update(rec.id) {
                 when {
-                    stopForSpace -> it.copy(status = RecStatus.DONE, bytes = bytes, endMillis = System.currentTimeMillis(), error = "Stopped early: the TV's storage is full.")
+                    stopForSpace -> it.copy(status = RecStatus.DONE, bytes = bytes, endMillis = System.currentTimeMillis(), error = "Stopped early: the ${com.gameday.tv.data.Device.noun}'s storage is full.")
                     bytes < 200_000 -> it.copy(status = RecStatus.FAILED, bytes = bytes, error = lastError ?: "No video was received.")
                     else -> it.copy(status = RecStatus.DONE, bytes = bytes)
                 }
@@ -184,12 +183,13 @@ class RecordingService : Service() {
 
     private fun notification(text: String): Notification {
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
+            // The app's own launcher activity (the TV and phone apps each have one).
+            this, 0, packageManager.getLaunchIntentForPackage(packageName) ?: Intent(),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("GameDay TV")
+            .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setOngoing(true)
             .setContentIntent(open)
