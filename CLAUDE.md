@@ -1,67 +1,108 @@
-# CLAUDE.md
+# GameDay TV
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Live TV and sports app for Android TV / Fire TV, plus a phone and tablet app, built around the user's own IPTV
+service (Xtream Codes or M3U). YouTube TV-style UI, ESPN live scores, game → channel matching, DVR, Multiview and
+profiles. Sports and live TV only (no On Demand / VOD). No backend: accounts, profiles and settings live on the device.
 
-## What this is
+## Stack
+- Kotlin, Jetpack Compose + Compose for TV (`tv-material`), Material 3 (phone app only), Media3 ExoPlayer (HLS + OkHttp
+  data source), OkHttp, Coil 3, coroutines. JSON is parsed by hand with `org.json` / `JsonReader`: no serialization
+  libraries, no Room, no DI, no Navigation-Compose.
+- JDK 17+, compileSdk 37, targetSdk 36, minSdk 26. Namespace `com.gameday.tv`. AGP 9 with built-in Kotlin.
+- Single Gradle module `:app`, two product flavors (dimension `device`):
+  - `tv` (default): app id `com.gameday.tv`, label "GameDay TV", leanback launcher.
+  - `mobile`: app id `com.gameday.tv.mobile`, label "GameDay", Material 3 touch UI (`mobileImplementation` only).
 
-GameDay TV: an Android TV / Fire TV app (Kotlin, Jetpack Compose + Compose for TV, Media3/ExoPlayer) that plays the user's own IPTV service (Xtream Codes or M3U) with a YouTube TV-style UI, ESPN live scores, game→channel matching, DVR and Multiview. It's focused on sports and live TV (there is no On Demand / VOD). Single Gradle module `:app`, package `com.gameday.tv`. There is no backend: accounts, profiles and settings live on the device.
+## Commands (Windows: use `.\gradlew.bat`)
+- Release APKs: `assembleTvRelease` → `app/build/outputs/apk/tv/release/app-tv-release.apk`;
+  `assembleMobileRelease` → `app/build/outputs/apk/mobile/release/app-mobile-release.apk`
+- Debug: `assembleTvDebug assembleMobileDebug`
+- Unit tests: `testTvDebugUnitTest` (they only touch shared code); one class: `--tests "com.gameday.tv.data.ChannelMatcherTest"`
+- Lint: `lintTvDebug lintMobileDebug`
+- After changing shared code, compile both flavors: `compileTvDebugKotlin compileMobileDebugKotlin`.
+- There's no `local.properties`: set `$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"` before Gradle.
+- Install: `adb install -r <apk>` (adb is in `%LOCALAPPDATA%\Android\Sdk\platform-tools`).
+- Mock IPTV server for development without a real login: `java tools/mock-xtream/MockXtream.java`, then
+  `adb reverse tcp:8085 tcp:8085`. Credentials and endpoints: `tools/mock-xtream/README.md`.
 
-Two apps come from the one module as product flavors (dimension `device`): `tv` (app id `com.gameday.tv`, the default) and `mobile` (phones/tablets, app id `com.gameday.tv.mobile`, label "GameDay"). `src/main` holds everything shared — data, DVR, `AppViewModel`, the player controller, and the TV screens. `src/tv` has only `MainActivity` and the leanback manifest. `src/mobile/java/com/gameday/tv/mobile/` is the touch UI (Material 3, `mobileImplementation` only), which reuses the view model, menus (`Menus.kt` dialogs render as bottom sheets), card artwork, score bugs and `StreamController`. Shared code must not reference `MainActivity` (use `getLaunchIntentForPackage`); device wording in shared messages comes from `data/Device.kt` ("TV" / "device").
-
-The README is the user-facing changelog and feature spec (including the remote-control key tables). When behavior changes, update the "What's new" section and the key tables there.
-
-## Commands
-
-Requires JDK 17+ and the Android SDK (compileSdk 37, minSdk 26).
-
-```
-gradlew.bat assembleTvRelease          # → app/build/outputs/apk/tv/release/app-tv-release.apk
-gradlew.bat assembleMobileRelease      # → app/build/outputs/apk/mobile/release/app-mobile-release.apk
-gradlew.bat assembleTvDebug assembleMobileDebug
-gradlew.bat testTvDebugUnitTest        # all JVM unit tests (they only touch shared code)
-gradlew.bat testTvDebugUnitTest --tests "com.gameday.tv.data.ChannelMatcherTest"
-gradlew.bat testTvDebugUnitTest --tests "com.gameday.tv.data.M3uParserTest.someTestName"
-gradlew.bat lintTvDebug lintMobileDebug
-adb install -r app/build/outputs/apk/tv/release/app-tv-release.apk
-```
-
-When changing shared code, compile both flavors (`compileTvDebugKotlin compileMobileDebugKotlin`). If Gradle can't find the SDK, set `ANDROID_HOME` (e.g. `%LOCALAPPDATA%\Android\Sdk`).
-
-Release builds are minified (R8) and signed with `~/.gameday-tv/keystore.properties` (overridable with `-PgamedayKeystore=<path>`); without that file they fall back to the debug key.
-
-Unit tests are plain JUnit 4 under `app/src/test` (no instrumented tests). `android.jar` only has stubs, so tests use real `org.json` via `testImplementation`. Logic that needs testing is deliberately kept free of Android/Compose types (e.g. `MultiviewRules`, `OkKeyGate`, `ScoreDelay`, parsers in `data/`).
-
-### Mock IPTV server
-
-`tools/mock-xtream/MockXtream.java` is a single-file fake Xtream panel and M3U playlist for development without a real login:
-
-```
-java tools/mock-xtream/MockXtream.java
-adb reverse tcp:8085 tcp:8085
-```
-
-Credentials and endpoints are in `tools/mock-xtream/README.md`.
+## Map
+- `app/src/main/java/com/gameday/tv/`: shared by both apps
+  - `data/`: models, `SettingsStore` (accounts, per-account and per-profile prefs, 1.x import), `Security` (PBKDF2,
+    Keystore-encrypted secrets), `IptvSource` (Xtream + M3U), `Providers` (multi-provider id scoping), `ScoresRepository`
+    (ESPN), `ChannelMatcher`, `ScoreDelay`, `StreamQuality`, `Xmltv`, `Subtitles`, `Http` (shared OkHttp client),
+    `Device` ("TV" / "device" wording)
+  - `dvr/`: `RecordingService` (foreground service + alarms), `StreamRecorder` (TS/HLS), `RecordingStore`
+  - `ui/`: `AppViewModel` (everything: navigation, session, scores, providers, guide, playback, Multiview, DVR, search),
+    `AppModels` (`Screen`, `Tab`, `PlayRequest`, `AppDialog`), `StreamPlayer` (`StreamController`), `Menus` (long-press
+    menus as `AppDialog`s), `ScoreBugs`, `Cards`/`ContentCards` (artwork), and all the TV screens
+- `app/src/tv/`: `MainActivity` (screen routing, remote keys) and the leanback manifest (features, banner)
+- `app/src/mobile/java/com/gameday/tv/mobile/`: the phone UI. `MobileActivity` (routing, landscape + picture-in-picture
+  for video screens), `MobileMain` (tab bar, mini player, Sports/Live/Library), `MobilePlayer`, `MobileMultiview`,
+  `MobileDetails`, `MobileSettings`, `MobileAuth`, `MobileSetup`, `MobileComponents`, `MobileTheme`
+- `app/src/test/`: JUnit 4 unit tests
+- `tools/mock-xtream/`: fake Xtream panel and M3U playlist
 
 ## Architecture
+- **Navigation and state.** One `AppViewModel` owns a hand-rolled back stack of `Screen`s plus the current `Tab` (Sports,
+  Live, Library; Sports is `Tab.FIRST`). Each activity renders `vm.screen` with a `when`. Screens take `vm` and call its
+  methods (`navigate`, `back`, `replace`, `selectTab`, `openGame`, …). State is Compose `mutableStateOf` on the view
+  model. `Screen.key` is used for dedupe and per-screen focus memory (`focusMemory` / `restoreFocusFor`) on TV.
+- **Persistence.** SharedPreferences in three layers: `AccountStore` (accounts, password hashes), per-account
+  (`prefsName(accountId)`: providers) and per-profile (`prefsName(accountId, profileId)`: teams, library, history,
+  playback prefs). Recordings metadata is `recordings.json` in `filesDir`.
+- **Multiple providers.** `Providers.kt` prefixes every id (`"<prefix>~<id>"`) and unprefixes ids passed back in. The
+  first provider keeps an empty prefix so older favorites, history and recordings still match. Mind this whenever channel
+  ids cross the data/UI boundary.
+- **Sports.** `ScoresRepository` polls ESPN public scoreboards (every 15 s while games are live). `ChannelMatcher` maps a
+  `Game` to channels by team names, national broadcasters and league packages; golf is a `Tournament`. `ScoreDelay`
+  makes the score bug and alerts trail the scoreboard (IPTV runs 30–90 s behind) so they don't spoil the stream.
+- **Playback.** `StreamController` wraps ExoPlayer: tries candidate URLs in turn (TS, then HLS), gives up on a stall after
+  25 s and tries the other format, recovers from falling behind the live window, and stops when the app goes to the
+  background to free the provider connection. One shared controller (`vm.mainStream`) serves the full-screen player and
+  the video behind the menus (TV) / mini player (phone); each Multiview tile has its own. `DecoderBudget` holds each
+  position's Hardware/Software choice; decoding never switches on its own.
+- **Remote keys (TV).** `MainActivity.dispatchKeyEvent` routes through `OkKeyGate`. Long-press OK handlers must call
+  `swallowRelease`. Back goes straight to `onBackPressedDispatcher`; a held Back first goes to `BackHold.action` (the
+  player's guide). `KeyActivity` tells D-pad focus moves apart from Android moving focus on its own.
+- **DVR.** `RecordingService` is a `specialUse` foreground service started by exact alarms (`RecordAlarmReceiver` re-arms
+  on boot and package replace). Recordings are the only thing with resume points ("Continue watching", keys `rec:<id>`).
 
-**Navigation and state.** There is one `AppViewModel` (`ui/AppViewModel.kt`, by far the largest file). It owns a hand-rolled back stack of `Screen` objects (`ui/AppModels.kt`) plus the current `Tab` (Sports, Live, Library; Sports is `Tab.FIRST`). `MainActivity` renders `vm.screen` with a `when` over `Screen` subclasses. There is no Navigation-Compose and no DI. Screens are composables that take `vm` and call its methods (`navigate`, `back`, `replace`, `selectTab`, `openGame`, …). State is held as Compose `mutableStateOf` / `mutableStateListOf` on the ViewModel. `Screen.key` is used for dedupe and for per-screen focus memory (`focusMemory` / `restoreFocusFor`), which is how Back/Up returns focus to the card the viewer left.
+## Conventions / decisions
+- Session naming: at the start of every session, rename it (`set_session_title` with `"self"`) to the version from
+  `versionName` in `app/build.gradle.kts`, as `major.minor` (e.g. "2.6"). Across a bump, use a range ("2.5 - 2.6").
+- The README is the user-facing changelog and feature spec (remote-key tables, phone touch-controls table). When
+  behavior changes, update "What's new" and those tables. Every release bumps `versionName`/`versionCode`.
+- User-facing text: plain, short sentences in YouTube TV / Nuvio terms. The README is written the same way.
+- TV flavor: everything must be reachable with the D-pad, and focus behavior (where focus lands on open and on Back) is a
+  feature. Check focus restore when adding screens or rows.
+- Phone flavor: reuse the view model, `Menus.kt` (dialogs render as bottom sheets), artwork, score bugs and
+  `StreamController` instead of duplicating logic. Text must get the light color from `MobileTheme` (Material's default
+  is black outside a surface). Video screens (Player, Multiview) turn landscape, hide system bars and allow PiP.
+- Shared code must never reference `MainActivity` (it's only in the tv source set); use `getLaunchIntentForPackage`.
+  Device wording in shared messages comes from `Device.noun`.
+- Testable logic stays free of Android/Compose types (`MultiviewRules`, `OkKeyGate`, `ScoreDelay`, parsers in `data/`).
+  `android.jar` only has stubs, so tests use real `org.json` via `testImplementation`.
+- Cleartext HTTP is intentional (most IPTV panels are http-only). Reuse `data/Http.kt`'s client so the User-Agent is the
+  same everywhere.
+- Release builds are minified (R8) and signed with `~/.gameday-tv/keystore.properties` (override with
+  `-PgamedayKeystore=<path>`); without it they fall back to the debug key. Keystores and `local.properties` are gitignored.
+- Use this app only with IPTV services the user is licensed for; the app hosts no content. Keep that note in the README.
 
-**Persistence.** `data/SettingsStore.kt` uses SharedPreferences in three layers: `AccountStore` (accounts, PBKDF2 password hashes), per-account settings (`prefsName(accountId)`, which holds providers), and per-profile settings (`prefsName(accountId, profileId)`, which holds teams, library, history and playback prefs). `LegacySettings` reads 1.x settings for import. Secrets (IPTV logins) are encrypted with an Android Keystore key (`data/Security.kt`). Recordings metadata is `recordings.json` in `filesDir`. JSON is parsed with `org.json` / `JsonReader` by hand: there are no serialization libraries and no reflection-kept model classes.
+## Gotchas
+- Windows PowerShell 5.1: `Get-Content -Raw` / `Set-Content -Encoding utf8` read UTF-8 as ANSI and write a BOM, which
+  mangled `›`, `·`, `●`, `…` in README and Kotlin files once. Use the Edit tool, or .NET `File.ReadAllText`/`WriteAllText`
+  with a no-BOM `UTF8Encoding`.
+- Screenshots: `adb shell screencap -p /sdcard/x.png` + `adb pull` (`exec-out >` redirection corrupts PNGs).
+- Commit messages: pass multi-line messages with `git commit -F <file>`; PowerShell splits a here-string argument.
 
-**Multiple providers.** An account can have several IPTV providers. `data/Providers.kt` wraps each `IptvSource` so every returned id is prefixed (`"<prefix>~<id>"`) and ids passed back in are unprefixed. The first provider keeps an empty prefix so pre-multi-provider favorites, history and recordings still match. Keep this scoping in mind whenever channel ids cross the data/UI boundary.
-
-**Sports.** `ScoresRepository` polls ESPN public scoreboards (every 15 s while games are live). `ChannelMatcher` maps a `Game` to lineup channels by team names, national broadcasters and league packages. Golf (PGA and DP World Tour) is modeled as `Tournament`, separate from `Game`. `ScoreDelay` keeps score history so the score bug and alerts trail the scoreboard (IPTV runs 30–90 s behind) and don't spoil the stream.
-
-**Playback.** `ui/StreamPlayer.kt` wraps ExoPlayer for IPTV. It tries candidate URLs in turn (TS, then HLS), detects stalls (gives up after 25 s and tries the alternate format), recovers from falling behind the live window, and releases or pauses when the app is backgrounded to free the provider connection. The same controller is used by the full-screen player, each Multiview tile, and the live video behind the menus (`MainShell`, rendered via a TextureView so it can fade). `PlayRequest` (Live / Catchup / Rec) is what the player shows. `DecoderBudget` holds each stream position's decoding choice (Hardware or Software, per device). Decoding never switches automatically: a hardware decoder failure shows an error telling the viewer to use fewer screens or Software.
-
-**Remote/key handling.** `MainActivity.dispatchKeyEvent` routes through `OkKeyGate`. Long-press OK handlers must call `swallowRelease` so the key release doesn't click whatever newly opened UI gained focus. Back is sent straight to `onBackPressedDispatcher` (Compose would otherwise turn it into a focus "Exit"); a held Back first goes to `BackHold.action`, which the player sets to open its guide. `KeyActivity` (next to `OkKeyGate`) tracks recent D-pad presses to tell user focus moves apart from Android moving focus on its own.
-
-**DVR.** `dvr/RecordingService` is a `specialUse` foreground service scheduled by exact alarms (`RecordAlarmReceiver` also re-arms on boot and package replace). `StreamRecorder` records TS and HLS. `RecordingStore` enforces the storage limit and auto-delete. Recordings are the only thing with resume points ("Continue watching", keys `rec:<id>`).
-
-## Conventions
-
-- Session naming: at the start of every session in this repo, rename the session (Claude Code desktop: `set_session_title` with `"self"`) to the app version it works on, from `versionName` in `app/build.gradle.kts`, as `major.minor` (e.g. "2.4"). If a session spans a version bump, use a range ("2.4 - 2.5").
-
-- The `tv` flavor is a TV app: everything must be reachable with the D-pad, and focus behavior (where focus lands on open and on Back) is treated as a feature. Check focus restore when adding screens or rows.
-- User-facing text is plain, short sentences in YouTube TV / Nuvio terms. The README is written the same way.
-- Cleartext HTTP is intentionally enabled (most IPTV panels are http-only). `data/Http.kt` holds the shared OkHttp client, so the User-Agent is the same everywhere; reuse it rather than creating new clients.
+## Current status / Next steps
+- **v2.5.1 (versionCode 9) is GitHub "Latest"** (2026-10-04): RedZone card in Live now. Releases attach the TV APK as
+  `GameDayTV.apk`; TV users install and update with Downloader code `3558070` (fetches `releases/latest`).
+- **2.6 (versionCode 10) is on `main`, not released yet**: the phone and tablet app (PR #3, merged 2026-10-07), plus a
+  fix for black-on-black text (`8daff1f`). Installed on the owner's Pixel 10 Pro XL (wireless adb) and checked only up to
+  the welcome screen; sign-in, provider, playback, PiP and Multiview still need a hands-on pass.
+- Before releasing 2.6: decide how to ship the phone APK (a second release asset, e.g. `GameDay.apk`, and a README link).
+- `lintTvDebug` fails on 4 errors in `MainActivity` key handling (`RestrictedApi` on `dispatchKeyEvent`,
+  `GestureBackNavigation`). The code predates 2.6; fix or baseline separately.
+- The in-app logo (`ui/AuthScreens.kt` `Logo`) says "GameDay TV" on the phone too.
+- Next steps: _(fill in)_
