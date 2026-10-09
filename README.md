@@ -4,7 +4,7 @@ A live TV and sports app for Android TV, built around **your IPTV service** and 
 
 **Install on Fire TV / Android TV:** open the [Downloader](https://www.aftvnews.com/downloader/) app and enter code **`3558070`**. It always fetches the [latest release](https://github.com/Yigder/gameday-tv/releases/latest).
 
-There's also a **phone and tablet app** (GameDay) with the same features and touch controls. It's a separate app, so it installs next to the TV app instead of replacing it.
+**Install on a phone or tablet:** download [GameDay.apk](https://github.com/Yigder/gameday-tv/releases/latest/download/GameDay.apk) on the device and open it (allow installs from your browser when Android asks). The phone app has the same features with touch controls. It's a separate app, so it installs next to the TV app instead of replacing it.
 
 ## What's new in 2.6
 

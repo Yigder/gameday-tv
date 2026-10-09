@@ -96,12 +96,13 @@ profiles. Sports and live TV only (no On Demand / VOD). No backend: accounts, pr
 - Commit messages: pass multi-line messages with `git commit -F <file>`; PowerShell splits a here-string argument.
 
 ## Current status / Next steps
-- **v2.5.1 (versionCode 9) is GitHub "Latest"** (2026-10-04): RedZone card in Live now. Releases attach the TV APK as
-  `GameDayTV.apk`; TV users install and update with Downloader code `3558070` (fetches `releases/latest`).
-- **2.6 (versionCode 10) is on `main`, not released yet**: the phone and tablet app (PR #3, merged 2026-10-07), plus a
-  fix for black-on-black text (`8daff1f`). Installed on the owner's Pixel 10 Pro XL (wireless adb) and checked only up to
-  the welcome screen; sign-in, provider, playback, PiP and Multiview still need a hands-on pass.
-- Before releasing 2.6: decide how to ship the phone APK (a second release asset, e.g. `GameDay.apk`, and a README link).
+- **v2.6.0 (versionCode 10) is GitHub "Latest"** (2026-10-09): the phone and tablet app (PR #3). Checked on the
+  owner's Pixel 10 Pro XL (wireless adb) only up to the welcome screen; sign-in, provider, playback, PiP and Multiview
+  still need a hands-on pass. v2.5.1 (versionCode 9, 2026-10-04) was the previous release.
+- Release flow: bump `versionName`/`versionCode`, update README "What's new", build `assembleTvRelease` and
+  `assembleMobileRelease`, tag `vX.Y.0`, and attach two assets: the TV APK as `GameDayTV.apk` (Downloader code
+  `3558070` fetches `releases/latest`, so keep the name) and the phone APK as `GameDay.apk` (README links to
+  `releases/latest/download/GameDay.apk`). Notes end with an "Upgrading" line.
 - `lintTvDebug` fails on 4 errors in `MainActivity` key handling (`RestrictedApi` on `dispatchKeyEvent`,
   `GestureBackNavigation`). The code predates 2.6; fix or baseline separately.
 - The in-app logo (`ui/AuthScreens.kt` `Logo`) says "GameDay TV" on the phone too.
