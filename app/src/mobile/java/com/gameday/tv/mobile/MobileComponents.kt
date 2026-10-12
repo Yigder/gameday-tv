@@ -61,7 +61,10 @@ import com.gameday.tv.data.RecStatus
 import com.gameday.tv.data.Recording
 import com.gameday.tv.data.ResumePoint
 import com.gameday.tv.data.Tournament
+import com.gameday.tv.data.UpdateProgress
 import com.gameday.tv.ui.AppDialog
+import com.gameday.tv.ui.rememberUpdateAction
+import com.gameday.tv.ui.updateText
 import com.gameday.tv.ui.AppViewModel
 import com.gameday.tv.ui.ChannelLogo
 import com.gameday.tv.ui.ChannelThumb
@@ -469,6 +472,46 @@ fun ProviderBanner(vm: AppViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (vm.iptv is IptvStatus.Failed) androidx.compose.material3.OutlinedButton(onClick = { vm.reloadChannels() }) { Text("Retry") }
             androidx.compose.material3.Button(onClick = { vm.navigate(Screen.Provider()) }) { Text("Set up provider") }
+        }
+    }
+}
+
+/** "A new GameDay is out" at the top of Sports. Update downloads and installs it; Not now hides it until the next one. */
+@Composable
+fun UpdateBanner(vm: AppViewModel) {
+    LaunchedEffect(Unit) { vm.checkForUpdate() }
+    val u = vm.update ?: return
+    val progress = vm.updateProgress
+    val start = rememberUpdateAction(vm, u)
+    val busy = progress is UpdateProgress.Downloading || progress is UpdateProgress.Installing
+    val (title, detail) = updateText(u, progress)
+    Column(
+        Modifier
+            .padding(horizontal = GUTTER, vertical = 8.dp)
+            .fillMaxWidth()
+            .background(AppColors.Raised, RoundedCornerShape(12.dp))
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AppIcon(Icons.Download, null)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text(detail, fontSize = 13.sp, color = AppColors.TextDim)
+            }
+        }
+        (progress as? UpdateProgress.Downloading)?.let { p ->
+            Spacer(Modifier.height(12.dp))
+            val fraction = p.fraction
+            if (fraction != null) androidx.compose.material3.LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+            else androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        if (!busy) {
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                androidx.compose.material3.Button(onClick = start) { Text(if (progress is UpdateProgress.Failed) "Try again" else "Update") }
+                androidx.compose.material3.OutlinedButton(onClick = { vm.dismissUpdate() }) { Text("Not now") }
+            }
         }
     }
 }

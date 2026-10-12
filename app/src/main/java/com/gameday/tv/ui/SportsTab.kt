@@ -20,6 +20,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,6 +41,7 @@ import com.gameday.tv.data.Leagues
 import com.gameday.tv.data.Program
 import com.gameday.tv.data.Tournament
 import com.gameday.tv.ui.theme.AppColors
+import kotlinx.coroutines.launch
 
 /** A card in a Sports row: team games and golf tournaments share the rows. */
 private sealed interface SportsItem {
@@ -68,6 +70,7 @@ fun SportsTab(vm: AppViewModel) {
     var filter by rememberSaveable { mutableStateOf("all") }
     val chips = remember { FocusRequester() }
     val selectedChip = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
     if (vm.tabWantsFocus) InitialFocus(vm, screenKey, chips)
     val onHero: (HeroInfo) -> Unit = { vm.heroFocus = it }
 
@@ -155,6 +158,7 @@ fun SportsTab(vm: AppViewModel) {
         Box(Modifier.weight(1f)) {
             PivotScroll(offset = ROW_TITLE) {
                 LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(top = 8.dp, bottom = 260.dp)) {
+                    item(key = "update") { UpdateBanner(vm) { scope.launch { chips.requestFocusSafely(0) } } }
                     if (!hasProvider) {
                         item(key = "provider") { ProviderBanner(vm) }
                     }

@@ -280,6 +280,7 @@ fun SportsTab(vm: AppViewModel) {
                     items(vm.followedPicks, key = { it.key }) { p -> FilterChip(filter == p.key, { filter = p.key }, label = { Text(p.label) }) }
                 }
             }
+            item(key = "update") { UpdateBanner(vm) }
             if (!hasProvider) item(key = "provider") { ProviderBanner(vm) }
             if (live.isNotEmpty()) {
                 rowSection("live", "Live now") {

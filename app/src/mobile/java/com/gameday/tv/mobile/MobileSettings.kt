@@ -406,6 +406,14 @@ private fun NotificationRow() {
 private fun LazyListScope.aboutSection(vm: AppViewModel) {
     header("About")
     item(key = "ver") { SettingItem("GameDay", {}, subtitle = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", icon = Icons.Info) }
+    item(key = "upd") {
+        SettingItem(
+            "Check for updates",
+            { vm.checkForUpdateNow() },
+            subtitle = vm.update?.let { "Version ${it.version} is available. Update from the top of Sports." } ?: "Updates come from GitHub",
+            icon = Icons.Download,
+        )
+    }
     item(key = "src") { SettingItem("Scores and video", {}, subtitle = "ESPN public scoreboards, refreshed every 15 s while games are live. Video from your IPTV provider.") }
     item(key = "hist") { SettingItem("Clear watch & search history", { vm.clearHistory() }, subtitle = "For ${vm.profile?.name ?: "this profile"}", icon = Icons.Delete) }
     note("priv", "Your account, profiles and library are stored only on this device. Your provider login is encrypted with the Android Keystore and only sent to your provider.")

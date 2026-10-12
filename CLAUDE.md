@@ -30,7 +30,8 @@ profiles. Sports and live TV only (no On Demand / VOD). No backend: accounts, pr
   - `data/`: models, `SettingsStore` (accounts, per-account and per-profile prefs, 1.x import), `Security` (PBKDF2,
     Keystore-encrypted secrets), `IptvSource` (Xtream + M3U), `Providers` (multi-provider id scoping), `ScoresRepository`
     (ESPN), `ChannelMatcher`, `ScoreDelay`, `StreamQuality`, `Xmltv`, `Subtitles`, `Http` (shared OkHttp client),
-    `Device` ("TV" / "device" wording)
+    `Device` ("TV" / "device" wording), `Updates` (in-app updates from GitHub `releases/latest`: each flavor downloads
+    its own asset, `GameDayTV.apk` or `GameDay.apk`, and installs it with `PackageInstaller`)
   - `dvr/`: `RecordingService` (foreground service + alarms), `StreamRecorder` (TS/HLS), `RecordingStore`
   - `ui/`: `AppViewModel` (everything: navigation, session, scores, providers, guide, playback, Multiview, DVR, search),
     `AppModels` (`Screen`, `Tab`, `PlayRequest`, `AppDialog`), `StreamPlayer` (`StreamController`), `Menus` (long-press
@@ -96,13 +97,18 @@ profiles. Sports and live TV only (no On Demand / VOD). No backend: accounts, pr
 - Commit messages: pass multi-line messages with `git commit -F <file>`; PowerShell splits a here-string argument.
 
 ## Current status / Next steps
-- **v2.6.0 (versionCode 10) is GitHub "Latest"** (2026-10-09): the phone and tablet app (PR #3). Checked on the
-  a phone (wireless adb) only up to the welcome screen; sign-in, provider, playback, PiP and Multiview
-  still need a hands-on pass. v2.5.1 (versionCode 9, 2026-10-04) was the previous release.
+- **Renumbered to 1.0** (2026-10-12): the 1.0.0–2.6.0 releases and tags were deleted from GitHub and v1.0.0
+  (versionCode 11) is "Latest": 2.6 plus in-app updates (`data/Updates.kt`). `versionCode` must keep rising past the
+  old releases (2.6 was 10); only `versionName` restarted. The update banner compares `versionName` with the release
+  tag, so tags stay `v1.x.y` from here. The phone app was only checked up to the welcome screen; sign-in, provider,
+  playback, PiP, Multiview and the in-app update still need a hands-on pass.
 - Release flow: bump `versionName`/`versionCode`, update README "What's new", build `assembleTvRelease` and
-  `assembleMobileRelease`, tag `vX.Y.0`, and attach two assets: the TV APK as `GameDayTV.apk` (Downloader code
-  `3558070` fetches `releases/latest`, so keep the name) and the phone APK as `GameDay.apk` (README links to
-  `releases/latest/download/GameDay.apk`). Notes end with an "Upgrading" line.
+  `assembleMobileRelease`, tag `vX.Y.Z`, and attach two assets: the TV APK as `GameDayTV.apk` (Downloader code
+  `3558070` fetches `releases/latest`, and the TV app's update banner looks for that name) and the phone APK as
+  `GameDay.apk` (README links to `releases/latest/download/GameDay.apk`; the phone app's banner looks for it). Never
+  mark a release as pre-release if it should reach the banner. Notes end with an "Upgrading" line.
+- Signing key: `~/.gameday-tv/release.jks` (cert SHA-256 `49d6daa6…5952d64`) has signed every release since the
+  first. Losing it means nobody can update in place; keep it backed up.
 - `lintTvDebug` fails on 4 errors in `MainActivity` key handling (`RestrictedApi` on `dispatchKeyEvent`,
   `GestureBackNavigation`). The code predates 2.6; fix or baseline separately.
 - The in-app logo (`ui/AuthScreens.kt` `Logo`) says "GameDay TV" on the phone too.

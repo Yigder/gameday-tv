@@ -6,4 +6,6 @@ import com.gameday.tv.BuildConfig
 object Device {
     val isMobile: Boolean = BuildConfig.FLAVOR == "mobile"
     val noun: String = if (isMobile) "device" else "TV"
+    /** The launcher label: "GameDay" on phones, "GameDay TV" on TVs. */
+    val appName: String = if (isMobile) "GameDay" else "GameDay TV"
 }

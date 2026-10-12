@@ -21,8 +21,9 @@ android {
         applicationId = "com.gameday.tv"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "2.6"
+        // Renumbered to 1.0 after 2.6 (versionCode 10). The code must keep going up so 2.6 installs update in place.
+        versionCode = 11
+        versionName = "1.0"
     }
 
     // Two apps from one codebase: the Android TV / Fire TV app (unchanged id, so it updates in place)

@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- In-app updates from GitHub releases (Android asks the viewer to allow it once). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- usesCleartextTraffic: most IPTV panels serve over plain http. -->
     <application
@@ -38,5 +40,9 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".data.UpdateInstallReceiver"
+            android:exported="false" />
     </application>
 </manifest>

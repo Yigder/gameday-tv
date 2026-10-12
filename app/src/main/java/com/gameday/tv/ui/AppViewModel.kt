@@ -49,6 +49,8 @@ import com.gameday.tv.data.StreamFormat
 import com.gameday.tv.data.StreamQuality
 import com.gameday.tv.data.TeamInfo
 import com.gameday.tv.data.Tournament
+import com.gameday.tv.data.UpdateChecker
+import com.gameday.tv.data.UpdateProgress
 import com.gameday.tv.data.Xmltv
 import com.gameday.tv.dvr.RecordScheduler
 import com.gameday.tv.dvr.RecordingStore
@@ -1872,6 +1874,62 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // =============================================================================================
+    // App updates
+    // =============================================================================================
+
+    private val updates = UpdateChecker(context) { p -> viewModelScope.launch { updateProgress = p } }
+
+    /** A newer release to offer on Sports, or null when this one is current (or it was dismissed). */
+    var update by mutableStateOf(updates.saved()); private set
+    var updateProgress by mutableStateOf<UpdateProgress>(UpdateProgress.Idle); private set
+    private var updateJob: Job? = null
+
+    /** Sports asks GitHub in the background; at most every six hours. */
+    fun checkForUpdate() {
+        if (updates.checkedRecently || updateJob?.isActive == true) return
+        updateJob = viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { updates.fetch() } }.onSuccess { update = it }
+        }
+    }
+
+    /** Settings › About: asks right away and says what it found. A dismissed version is offered again. */
+    fun checkForUpdateNow() {
+        if (updateJob?.isActive == true) return
+        updateJob = viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { updates.fetch(forget = true) } }
+                .onSuccess {
+                    update = it
+                    showMessage(if (it != null) "Version ${it.version} is available. It's at the top of Sports." else "You have the latest version")
+                }
+                .onFailure { showMessage("Couldn't check for updates: ${friendly(it)}") }
+        }
+    }
+
+    /**
+     * Downloads the update and opens Android's installer. Without permission to install apps the
+     * progress turns to [UpdateProgress.NeedsPermission] and the UI opens [updatePermissionIntent];
+     * this is called again once the viewer comes back.
+     */
+    fun installUpdate() {
+        val u = update ?: return
+        if (updateJob?.isActive == true) return
+        if (!updates.canInstall()) { updateProgress = UpdateProgress.NeedsPermission; return }
+        updateJob = viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { updates.install(u) } }
+                .onFailure { updateProgress = UpdateProgress.Failed(friendly(it)) }
+        }
+    }
+
+    fun canInstallUpdates(): Boolean = updates.canInstall()
+    fun updatePermissionIntent(): android.content.Intent = updates.permissionIntent()
+
+    fun dismissUpdate() {
+        update?.let { updates.dismiss(it) }
+        update = null
+        updateProgress = UpdateProgress.Idle
+    }
+
+    // =============================================================================================
 
     // Last in the class: everything above must be initialized before an account is entered.
     init {
@@ -1883,6 +1941,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { runScoreClock() }
         viewModelScope.launch { housekeeping() }
         viewModelScope.launch { RecordingStore.all.collect { all -> recordingsAll = all } }
+        viewModelScope.launch(Dispatchers.IO) { updates.cleanUp() }
     }
 
     fun friendly(e: Throwable): String = when (e) {

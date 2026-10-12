@@ -487,6 +487,14 @@ private fun ExactAlarmRow(vm: AppViewModel) {
 private fun LazyListScope.aboutSection(vm: AppViewModel) {
     header("GameDay TV")
     info("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+    item(key = "update") {
+        SettingRow(
+            "Check for updates",
+            { vm.checkForUpdateNow() },
+            subtitle = vm.update?.let { "Version ${it.version} is available. Update from the top of Sports." } ?: "Updates come from GitHub",
+            icon = Icons.Download,
+        )
+    }
     info("Scores", "ESPN public scoreboards, refreshed every 15 s while games are live")
     info("Video", "Your IPTV provider, played with Media3 / ExoPlayer")
     header("Privacy")
