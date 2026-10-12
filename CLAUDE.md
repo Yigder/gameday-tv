@@ -94,22 +94,36 @@ profiles. Sports and live TV only (no On Demand / VOD). No backend: accounts, pr
   mangled `›`, `·`, `●`, `…` in README and Kotlin files once. Use the Edit tool, or .NET `File.ReadAllText`/`WriteAllText`
   with a no-BOM `UTF8Encoding`.
 - Screenshots: `adb shell screencap -p /sdcard/x.png` + `adb pull` (`exec-out >` redirection corrupts PNGs).
+- The phone can show up twice in `adb devices` (USB and wireless). Pass `-s <serial>` or adb refuses to pick one.
 - Commit messages: pass multi-line messages with `git commit -F <file>`; PowerShell splits a here-string argument.
 
 ## Current status / Next steps
 - **Renumbered to 1.0** (2026-10-12): the 1.0.0–2.6.0 releases and tags were deleted from GitHub and v1.0.0
   (versionCode 11) is "Latest": 2.6 plus in-app updates (`data/Updates.kt`). `versionCode` must keep rising past the
   old releases (2.6 was 10); only `versionName` restarted. The update banner compares `versionName` with the release
-  tag, so tags stay `v1.x.y` from here. The phone app was only checked up to the welcome screen; sign-in, provider,
-  playback, PiP, Multiview and the in-app update still need a hands-on pass.
+  tag, so tags stay `v1.x.y` from here.
+- Checked on the Pixel 10 Pro XL (2026-10-12): the 1.0 phone APK installs over 2.6 with the account, profile and teams
+  kept, and Sports loads games and scores. Not yet checked by hand: provider connect, playback, PiP, Multiview, and
+  the update banner downloading and installing a real newer release (nothing newer than 1.0 exists yet). The TV app
+  1.0 hasn't been installed on a TV.
 - Release flow: bump `versionName`/`versionCode`, update README "What's new", build `assembleTvRelease` and
   `assembleMobileRelease`, tag `vX.Y.Z`, and attach two assets: the TV APK as `GameDayTV.apk` (Downloader code
   `3558070` fetches `releases/latest`, and the TV app's update banner looks for that name) and the phone APK as
   `GameDay.apk` (README links to `releases/latest/download/GameDay.apk`; the phone app's banner looks for it). Never
   mark a release as pre-release if it should reach the banner. Notes end with an "Upgrading" line.
+  After `gh release create`, check `gh release list` says "Latest", not "Draft": the 1.0 release was left as a draft
+  once, which makes `releases/latest` 404 (Downloader and the phone link break). Fix with
+  `gh release edit <tag> --draft=false --latest`.
 - Signing key: `~/.gameday-tv/release.jks` (cert SHA-256 `49d6daa6…5952d64`) has signed every release since the
   first. Losing it means nobody can update in place; keep it backed up.
 - `lintTvDebug` fails on 4 errors in `MainActivity` key handling (`RestrictedApi` on `dispatchKeyEvent`,
   `GestureBackNavigation`). The code predates 2.6; fix or baseline separately.
-- The in-app logo (`ui/AuthScreens.kt` `Logo`) says "GameDay TV" on the phone too.
-- Next steps: _(fill in)_
+- Phone UI bugs seen on 1.0: the in-app logo (`ui/AuthScreens.kt` `Logo`) says "GameDay TV" on the phone too, and
+  the selected tab in the bottom bar (`MobileMain`) shows a white pill with no icon (likely white on white).
+- Next steps:
+  - Fix the two phone UI bugs above and ship them as 1.0.1. That also tests the update banner end to end on the phone
+    and TV (Update → download → Android's installer → app restarts on 1.0.1).
+  - Hands-on pass of the phone app: provider, playback, PiP, Multiview.
+  - Install 1.0 on a TV / Fire TV and check the banner's focus (Down from the chips, Not now returns to the chips)
+    and whether Fire OS opens the "Install unknown apps" page.
+  - Fix or baseline the 4 `lintTvDebug` errors.
