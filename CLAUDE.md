@@ -97,7 +97,7 @@ profiles. Sports and live TV only (no On Demand / VOD). No backend: accounts, pr
 
 ## Current status / Next steps
 - **v2.6.0 (versionCode 10) is GitHub "Latest"** (2026-10-09): the phone and tablet app (PR #3). Checked on the
-  owner's Pixel 10 Pro XL (wireless adb) only up to the welcome screen; sign-in, provider, playback, PiP and Multiview
+  a phone (wireless adb) only up to the welcome screen; sign-in, provider, playback, PiP and Multiview
   still need a hands-on pass. v2.5.1 (versionCode 9, 2026-10-04) was the previous release.
 - Release flow: bump `versionName`/`versionCode`, update README "What's new", build `assembleTvRelease` and
   `assembleMobileRelease`, tag `vX.Y.0`, and attach two assets: the TV APK as `GameDayTV.apk` (Downloader code
