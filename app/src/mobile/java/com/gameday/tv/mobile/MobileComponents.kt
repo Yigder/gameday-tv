@@ -476,7 +476,7 @@ fun ProviderBanner(vm: AppViewModel) {
     }
 }
 
-/** "A new GameDay is out" at the top of Sports. Update downloads and installs it; Not now hides it until the next one. */
+/** "A new GameDay TV is out" at the top of Sports. Update downloads and installs it; Not now hides it until the next one. */
 @Composable
 fun UpdateBanner(vm: AppViewModel) {
     LaunchedEffect(Unit) { vm.checkForUpdate() }

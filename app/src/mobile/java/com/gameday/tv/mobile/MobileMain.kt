@@ -105,7 +105,8 @@ fun MainScreen(vm: AppViewModel, stateHolder: SaveableStateHolder) {
                         NavigationBarItem(
                             selected = t == tab,
                             onClick = { vm.selectTab(t) },
-                            icon = { AppIcon(tabIcon(t), null) },
+                            // The bar's colors (black on the white pill when selected) come in as the content color.
+                            icon = { AppIcon(tabIcon(t), null, tint = androidx.compose.material3.LocalContentColor.current) },
                             label = { Text(t.label) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = Color.Black,
@@ -453,7 +454,7 @@ fun LibraryTab(vm: AppViewModel) {
                 items(done, key = { it.id }) { RecordingTile(vm, it, width = null) }
             }
             LibSection.SCHEDULED -> LibGrid(scheduled.isEmpty(), "Nothing scheduled",
-                if (vm.canWakeExactly) null else "Tip: allow GameDay to set alarms (Settings › Recordings) so recordings start on time.") {
+                if (vm.canWakeExactly) null else "Tip: allow GameDay TV to set alarms (Settings › Recordings) so recordings start on time.") {
                 items(scheduled, key = { it.id }) { RecordingTile(vm, it, width = null) }
             }
             LibSection.CONTINUE -> LibGrid(continueWatching.isEmpty(), "Nothing in progress", "Recordings you start show up here.") {

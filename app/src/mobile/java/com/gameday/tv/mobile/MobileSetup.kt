@@ -162,7 +162,7 @@ fun ProviderScreen(vm: AppViewModel, onboarding: Boolean, editId: String? = null
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Sign in with the details your IPTV provider gave you. GameDay uses them to show your channels and guide, " +
+                "Sign in with the details your IPTV provider gave you. GameDay TV uses them to show your channels and guide, " +
                     "and to find the channel for every game. Your login is encrypted on this device and only sent to your provider.",
                 fontSize = 14.sp, color = AppColors.TextDim, lineHeight = 20.sp,
             )
@@ -206,7 +206,7 @@ fun ProviderScreen(vm: AppViewModel, onboarding: Boolean, editId: String? = null
             if (onboarding) {
                 Spacer(Modifier.height(8.dp))
                 TextButton(onClick = { vm.skipProvider(); vm.finishOnboardingStep(0) }, Modifier.fillMaxWidth()) { Text("Skip for now", color = AppColors.TextDim) }
-                Text("Skip to use GameDay for live scores only. You can add a provider later in Settings.", fontSize = 12.sp, color = AppColors.TextFaint)
+                Text("Skip to use GameDay TV for live scores only. You can add a provider later in Settings.", fontSize = 12.sp, color = AppColors.TextFaint)
             }
         }
     }

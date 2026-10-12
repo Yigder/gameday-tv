@@ -6,11 +6,18 @@ A live TV and sports app for Android TV, built around **your IPTV service** and 
 
 **Install on a phone or tablet:** download [GameDay.apk](https://github.com/Yigder/gameday-tv/releases/latest/download/GameDay.apk) on the device and open it (allow installs from your browser when Android asks). The phone app has the same features with touch controls. It's a separate app, so it installs next to the TV app instead of replacing it.
 
+## What's new in 1.0.1
+
+- **New app icon:** a TV with a ball on screen and a red live dot. The TV home screen banner matches it.
+- **The phone app is called GameDay TV too**, on your home screen and inside the app.
+- **Cleaner logo:** the top of the app shows just the "GameDay TV" name, without the small red "GD" tile.
+- **Fix:** on phones, the selected tab in the bottom bar shows its icon again (it was white on white).
+
 ## What's new in 1.0
 
 GameDay starts over at 1.0. This version has everything from the earlier releases (the last one was 2.6), plus updates from inside the app:
 
-- **Update from inside the app.** When a new version is out, a banner at the top of Sports says so. Choose **Update** to download it and install it over this one (Android asks once to allow GameDay to install apps, then asks you to confirm). Your account, profiles, library and recordings stay. **Not now** hides the banner until the next version. Settings › About › **Check for updates** checks right away. The app only asks GitHub for the latest release; nothing about you is sent.
+- **Update from inside the app.** When a new version is out, a banner at the top of Sports says so. Choose **Update** to download it and install it over this one (Android asks once to allow GameDay TV to install apps, then asks you to confirm). Your account, profiles, library and recordings stay. **Not now** hides the banner until the next version. Settings › About › **Check for updates** checks right away. The app only asks GitHub for the latest release; nothing about you is sent.
 - **Two apps:** GameDay TV for Android TV and Fire TV, and GameDay for phones and tablets. They have the same features; the phone app uses touch controls, turns the player to landscape and keeps playing in picture-in-picture.
 - **Sports, Live and Library tabs**, like YouTube TV, with live video playing behind the menus.
 - **Live scores** for every game, matched to the channel in your lineup that's showing it, with the best stream first.

@@ -145,7 +145,7 @@ fun WelcomeScreen(vm: AppViewModel) {
         AuthHeader(
             title = "Live sports and TV,\nthe way you like it",
             subtitle = "Live scores for every game, your IPTV channels, a program guide, recordings and Multiview, together in one place. " +
-                "Create a free GameDay account to save your teams, library and profiles.",
+                "Create a free GameDay TV account to save your teams, library and profiles.",
         )
         if (accounts.isNotEmpty()) {
             Text("Choose an account", fontSize = 15.sp, color = AppColors.TextDim)
@@ -208,7 +208,7 @@ fun SignInScreen(vm: AppViewModel, presetEmail: String) {
     }
 
     FormPage {
-        AuthHeader("Sign in", "Sign in to your GameDay account to get your profiles, teams, library and TV provider.")
+        AuthHeader("Sign in", "Sign in to your GameDay TV account to get your profiles, teams, library and TV provider.")
         FormErrorText(error)
         FormField(email, { email = it }, "Email", keyboardType = KeyboardType.Email)
         Spacer(Modifier.height(12.dp))
@@ -220,7 +220,7 @@ fun SignInScreen(vm: AppViewModel, presetEmail: String) {
             vm.showDialog(
                 AppDialog(
                     title = "Forgot your password?",
-                    message = "GameDay accounts are stored on this device, so there's no email reset. " +
+                    message = "GameDay TV accounts are stored on this device, so there's no email reset. " +
                         "You can create a new account, and set up your provider and teams again.",
                     actions = listOf(
                         DialogAction("Create a new account", onClick = { vm.dismissDialog(); vm.replace(Screen.CreateAccount) }),
@@ -268,7 +268,7 @@ fun CreateAccountScreen(vm: AppViewModel) {
         Spacer(Modifier.height(20.dp))
         Button(onClick = ::submit, Modifier.fillMaxWidth(), enabled = !busy) { Text(if (busy) "Creating account…" else "Create account") }
         Spacer(Modifier.height(14.dp))
-        Text("Stored only on this device. GameDay doesn't send your account anywhere.", fontSize = 12.sp, color = AppColors.TextFaint)
+        Text("Stored only on this device. GameDay TV doesn't send your account anywhere.", fontSize = 12.sp, color = AppColors.TextFaint)
     }
 }
 

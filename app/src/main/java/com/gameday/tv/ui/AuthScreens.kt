@@ -42,17 +42,10 @@ import com.gameday.tv.data.AppAccount
 import com.gameday.tv.ui.theme.AppColors
 import kotlinx.coroutines.launch
 
-/** The app's wordmark: a "GD" scoreboard tile and "GameDay TV". */
+/** The app's wordmark, "GameDay TV". [size] is the height it was designed around. */
 @Composable
 fun Logo(size: Dp = 26.dp) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(size).background(Brush.linearGradient(listOf(Color(0xFFFF5A1F), AppColors.Live)), RoundedCornerShape(size * 0.22f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("GD", fontSize = (size.value * 0.46f).sp, fontWeight = FontWeight.Black, color = Color.White, letterSpacing = (-0.5).sp)
-        }
-        Spacer(Modifier.width(size * 0.35f))
         Text("GameDay", fontSize = (size.value * 0.85f).sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
         Text(" TV", fontSize = (size.value * 0.85f).sp, fontWeight = FontWeight.Normal, color = AppColors.TextDim)
     }

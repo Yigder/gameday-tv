@@ -185,7 +185,7 @@ private fun LazyListScope.profilesSection(vm: AppViewModel) {
 
 private fun LazyListScope.providerSection(vm: AppViewModel) {
     header("TV providers", "Add more than one login or playlist: their channels and guides are combined.")
-    if (vm.providers.isEmpty()) note("none", "No provider connected. GameDay shows live scores, but you'll need a provider to watch.")
+    if (vm.providers.isEmpty()) note("none", "No provider connected. GameDay TV shows live scores, but you'll need a provider to watch.")
     val nf = NumberFormat.getIntegerInstance()
     items(vm.providers.toList(), key = { "pv:" + it.id }) { p ->
         val status = vm.providerStatus[p.id]
@@ -376,10 +376,10 @@ private fun ExactAlarmRow(vm: AppViewModel) {
             if (!allowed && Build.VERSION.SDK_INT >= 31) {
                 runCatching {
                     context.startActivity(Intent(AndroidSettings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
-                }.onFailure { vm.showMessage("Open Android Settings › Apps › GameDay › Alarms & reminders") }
+                }.onFailure { vm.showMessage("Open Android Settings › Apps › GameDay TV › Alarms & reminders") }
             }
         },
-        subtitle = if (allowed) "Allowed: GameDay can wake up for scheduled recordings" else "Allow \"Alarms & reminders\" so scheduled recordings start exactly on time",
+        subtitle = if (allowed) "Allowed: GameDay TV can wake up for scheduled recordings" else "Allow \"Alarms & reminders\" so scheduled recordings start exactly on time",
         value = if (allowed) "On" else "Off",
     )
 }
@@ -405,7 +405,7 @@ private fun NotificationRow() {
 
 private fun LazyListScope.aboutSection(vm: AppViewModel) {
     header("About")
-    item(key = "ver") { SettingItem("GameDay", {}, subtitle = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", icon = Icons.Info) }
+    item(key = "ver") { SettingItem("GameDay TV", {}, subtitle = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", icon = Icons.Info) }
     item(key = "upd") {
         SettingItem(
             "Check for updates",

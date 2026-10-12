@@ -102,10 +102,14 @@ profiles. Sports and live TV only (no On Demand / VOD). No backend: accounts, pr
   (versionCode 11) is "Latest": 2.6 plus in-app updates (`data/Updates.kt`). `versionCode` must keep rising past the
   old releases (2.6 was 10); only `versionName` restarted. The update banner compares `versionName` with the release
   tag, so tags stay `v1.x.y` from here.
-- Checked on the Pixel 10 Pro XL (2026-10-12): the 1.0 phone APK installs over 2.6 with the account, profile and teams
-  kept, and Sports loads games and scores. Not yet checked by hand: provider connect, playback, PiP, Multiview, and
-  the update banner downloading and installing a real newer release (nothing newer than 1.0 exists yet). The TV app
-  1.0 hasn't been installed on a TV.
+- **v1.0.1 (versionCode 12) is "Latest"** (2026-10-12): new adaptive launcher icon (`res/drawable/ic_launcher*.xml`:
+  TV, basketball, red live dot; with a monochrome layer) and a matching TV banner (`drawable-xhdpi/banner.png`), the
+  phone app renamed "GameDay TV" (label, in-app text, `Device.appName`), the "GD" tile dropped from `Logo`, and the
+  phone tab bar icon fixed (`AppIcon` hard-codes a light tint, so pass `LocalContentColor.current` where Material
+  colors should apply). The release asset is still `GameDay.apk` for the phone; don't rename it.
+- Checked on the Pixel 10 Pro XL (2026-10-12): 1.0 installs over 2.6 with the account, profile and teams kept; 1.0.1
+  shows the new icon, name and tab bar. That phone got 1.0.1 by adb, so the update banner hasn't run against a real
+  newer release yet. Not yet checked by hand: provider connect, playback, PiP, Multiview. No TV has 1.0.x yet.
 - Release flow: bump `versionName`/`versionCode`, update README "What's new", build `assembleTvRelease` and
   `assembleMobileRelease`, tag `vX.Y.Z`, and attach two assets: the TV APK as `GameDayTV.apk` (Downloader code
   `3558070` fetches `releases/latest`, and the TV app's update banner looks for that name) and the phone APK as
@@ -118,12 +122,9 @@ profiles. Sports and live TV only (no On Demand / VOD). No backend: accounts, pr
   first. Losing it means nobody can update in place; keep it backed up.
 - `lintTvDebug` fails on 4 errors in `MainActivity` key handling (`RestrictedApi` on `dispatchKeyEvent`,
   `GestureBackNavigation`). The code predates 2.6; fix or baseline separately.
-- Phone UI bugs seen on 1.0: the in-app logo (`ui/AuthScreens.kt` `Logo`) says "GameDay TV" on the phone too, and
-  the selected tab in the bottom bar (`MobileMain`) shows a white pill with no icon (likely white on white).
 - Next steps:
-  - Fix the two phone UI bugs above and ship them as 1.0.1. That also tests the update banner end to end on the phone
-    and TV (Update → download → Android's installer → app restarts on 1.0.1).
+  - Test the update banner end to end with the next release (1.0.2): a device on 1.0.1 should show it, download it,
+    open Android's installer and restart on the new version. Check on the phone and a TV / Fire TV (banner focus:
+    Down from the chips, Not now returns to the chips; whether Fire OS opens the "Install unknown apps" page).
   - Hands-on pass of the phone app: provider, playback, PiP, Multiview.
-  - Install 1.0 on a TV / Fire TV and check the banner's focus (Down from the chips, Not now returns to the chips)
-    and whether Fire OS opens the "Install unknown apps" page.
   - Fix or baseline the 4 `lintTvDebug` errors.
